@@ -12,13 +12,21 @@
 <body>
 <div class="container">
 
-  <!-- 吸顶工具条：左返回 + 标题，右跳转命令测试页 -->
+  <!-- 吸顶工具条：左返回 + 标题；右连接设备（与 ble-console.html 同一套写法）+ 跳转命令测试页 -->
   <div class="topbar" id="topbar">
     <div class="topbar-left">
       <a href="./index.html" class="nav-back">← 工具箱</a>
       <span class="topbar-title"><span class="icon">🖼️</span> E6 六色图像转换</span>
     </div>
     <div class="topbar-right">
+      <span class="badge off" id="bleState"><span id="bleStateText">未连接</span></span>
+      <span class="kv topbar-device" id="bleDeviceName"></span>
+      <button class="btn btn-primary btn-sm" id="btnConnect" type="button" title="连接 BLE 设备">
+        <span class="btn-ico">🔗</span><span class="btn-label">连接 BLE</span>
+      </button>
+      <button class="btn btn-danger btn-sm" id="btnDisconnect" type="button" disabled title="断开连接">
+        <span class="btn-ico">⏏️</span><span class="btn-label">断开</span>
+      </button>
       <a class="btn btn-sm" href="./ble-console.html" title="BLE 命令测试">
         <span class="btn-ico">📶</span><span class="btn-label">命令测试</span>
       </a>
@@ -184,9 +192,10 @@
            - 送图 #btnSend：0x20 擦除同槽等 DONE → 0x30 逐片写（233 字节 × 742 片，帧 244 字节）；
            - 刷图 #btnRefresh：0x11 把该槽已经写好的图刷到屏上，不改 Flash 内容；
            - 中止 #btnCancelSend：送图过程中在下一片前停下（已写入的分片保持不动）。
+           连接不在这张卡片里：连接 / 断开与状态徽章放在顶部工具条（和 ble-console.html 一致），
+           控件在页面顶部：#bleState / #bleStateText / #bleDeviceName / #btnConnect / #btnDisconnect。
            两个命令互斥（docs/conventions.md §1）：任一条执行中，连接以外的命令控件全部禁用。
            送图要求当前转换结果正好 172800 字节（480×720 4bpp），否则 #btnSend 保持禁用。
-           控件：连接 #btnConnect / #btnDisconnect，状态 #bleState / #bleStateText / #bleDeviceName；
            进度 #sendBar / #sendText / #sendSpeed，状态 #sendState / #sendMs；
            帧预览 #sendFrame（送图首片）、#refreshFrame（0x11 整帧）。
            送图期间 ble.js 会设 client.silentCmd = 0x30，742 片不逐条写日志，只靠进度条。 -->
@@ -195,26 +204,6 @@
           <span>4 · 送图 / 刷图</span>
           <span class="sub">0x30 写 Flash · 0x11 显示</span>
         </div>
-
-        <div class="row" style="align-items:flex-end;">
-          <div class="form-group" style="flex:0 0 auto;">
-            <label>连接状态</label>
-            <div class="control-line">
-              <span class="badge off" id="bleState"><span id="bleStateText">未连接</span></span>
-              <span class="kv" id="bleDeviceName"></span>
-            </div>
-          </div>
-          <span class="spacer"></span>
-          <div class="form-group" style="flex:0 0 auto;">
-            <label>&nbsp;</label>
-            <div class="row">
-              <button class="btn btn-primary" id="btnConnect" type="button">连接设备</button>
-              <button class="btn" id="btnDisconnect" type="button" disabled>断开</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="divider"></div>
 
         <div class="row" style="align-items:flex-end;">
           <div class="form-group" style="flex:0 1 170px;">
@@ -249,6 +238,7 @@
         <div class="frame-line">刷图帧 <code class="mono" id="refreshFrame">—</code></div>
 
         <p class="hint" style="margin-top:8px;">
+          先在右上角<b>连接 BLE</b>。连上后同一个槽位下拉框先后发两条命令：
           <b>送图</b>先 <code>0x20</code> 擦除该槽、再 <code>0x30</code> 逐片写（233 字节 × 742 片，每片等 DONE），
           只把数据写进 Flash，<b>屏上不会有变化</b>；要显示再点<b>刷图</b>（<code>0x11</code>）。
           槽里没数据（刚擦除过）时刷图只会刷出空白。
