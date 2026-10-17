@@ -148,6 +148,10 @@ code, kbd, pre { font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monos
   justify-content: flex-end;
 }
 
+/* 顶栏连接状态：默认隐藏（下方已有一行完整状态），滚动后标题收起时再出现 */
+#bleStatusTop { display: none; }
+.topbar.scrolled #bleStatusTop { display: inline-flex; }
+
 @media (max-width: 640px) {
   body { padding: 12px 14px 32px; }
   .topbar-right { width: 100%; margin-left: 0; justify-content: flex-start; }

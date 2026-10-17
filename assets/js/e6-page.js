@@ -55,6 +55,8 @@
     bleWarn: $('bleWarn'),
     bleStatus: $('bleStatus'),
     bleStatusText: $('bleStatusText'),
+    bleStatusTop: $('bleStatusTop'),
+    bleStatusTopText: $('bleStatusTopText'),
     bleDeviceName: $('bleDeviceName'),
     nameFilter: $('nameFilter'),
     btnConnect: $('btnConnect'),
@@ -412,11 +414,28 @@
   });
 
   /* ---------------- BLE ---------------- */
+
+  /**
+   * 同步两处连接状态徽章（页面状态行 + 滚动后的顶栏）。
+   * 徽章只显示三态短文案，设备名单独放在右侧的 #bleDeviceName，
+   * 完整过程文字（正在选择设备/发现服务…）放进 title 悬浮提示。
+   */
+  function setStatus(st, fullText) {
+    const connected = st === 'connected';
+    const label = connected ? '已连接' : st === 'connecting' ? '连接中…' : '未连接';
+    const cls = 'badge ' + (connected ? 'ok' : st === 'connecting' ? 'ready' : 'off');
+    [el.bleStatus, el.bleStatusTop].forEach((badge) => {
+      badge.className = cls;
+      badge.title = fullText || label;
+    });
+    el.bleStatusText.textContent = label;
+    el.bleStatusTopText.textContent = label;
+  }
+
   const ble = window.EPDBLE.create({
     onLog: (type, text) => log(type, text),
     onStatus: (st, text) => {
-      el.bleStatusText.textContent = text;
-      el.bleStatus.className = 'badge ' + (st === 'connected' ? 'ok' : st === 'connecting' ? 'ready' : 'off');
+      setStatus(st, text);
       const connected = st === 'connected';
       el.btnConnect.disabled = connected || st === 'connecting';
       el.btnDisconnect.disabled = !connected;
@@ -461,8 +480,7 @@
       } else {
         log('err', '连接失败：' + (err && err.message ? err.message : err));
       }
-      el.bleStatusText.textContent = '未连接';
-      el.bleStatus.className = 'badge off';
+      setStatus('idle');
     }
   });
 
