@@ -30,7 +30,8 @@
     <h1><span class="icon">🧰</span> EPD Toolbox</h1>
     <p>
       电子纸上位机工具箱。当前提供 <b>E6 六色（黑 / 白 / 黄 / 红 / 蓝 / 绿）</b> 图片抖动量化、
-      4bpp 数据打包导出，以及独立的 BLE 命令测试页（读版本 / 刷纯色 / 刷图 / 擦除 / 送图）。
+      4bpp 数据打包导出、BLE 送图 / 刷图，以及逐条下发命令的 BLE 命令测试页
+      （读版本 / 刷纯色 / 刷图 / 擦除 / 送图）。
       纯静态页面，无后端、无构建步骤。
     </p>
   </header>
@@ -42,7 +43,7 @@
     <a class="tool-card" href="e6-image.html">
       <div class="tool-icon">🖼️</div>
       <h3>E6 六色图像转换 <span class="badge ready">可用</span></h3>
-      <p>上传图片 → 抖动量化到 6 色 → 生成 480×720 / 4bpp 面板数据，支持导出 bin / C 数组。</p>
+      <p>上传图片 → 抖动量化到 6 色 → 生成 480×720 / 4bpp 面板数据，可导出 bin / C 数组，也能直接连设备送图（0x30）并刷图（0x11）。</p>
       <div class="tool-meta"><span>抖动算法 12 种</span><span>480×720</span><span>0.5 B/像素</span></div>
     </a>
 
