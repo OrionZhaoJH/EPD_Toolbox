@@ -176,5 +176,9 @@ node tests/ble.test.mjs
   否则禁用并保留说明（其它分辨率只能导出，写进 Flash 会错位）；
 - **按钮文案必须带命令码**：`送图（0x30）` / `刷图（0x11）`，并在提示里写明顺序
   `0x20 → 0x30 → 0x11` 和「只送图不刷图屏上不会变」——这一步最容易漏，文案写清比事后解释便宜；
+- **连接 / 断开与连接状态徽章放顶部工具条，不塞进命令卡片**（和 `ble-console.html` 一致）：
+  送图要几十秒，用户常常滚到下面看进度，连接入口跟着页面滚走就得来回找；
+  顶栏里依次是 `#bleState`（`#bleStateText`）、`#bleDeviceName`、`#btnConnect`、`#btnDisconnect`，
+  设备名用 `.topbar-device` 限宽省略、≤640px 隐藏，避免把按钮挤到第二行；
 - 互斥、状态徽章、进度与中止沿用 §1 / §6 的同一套写法（`applyCommandEnabled()` /
   `setCommandLock()` / `setSendState()`），命令执行中除连接外的控件全部禁用。
