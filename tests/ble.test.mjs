@@ -304,6 +304,68 @@ console.log('BLE 组帧与解析自测');
   }
 }
 
+/* 15. updateImage（0x11）：帧格式、槽号校验、完成帧 CMD 写死 0x10 也能等到 */
+{
+  const beats = [];
+  const handlers = {
+    onLog() {},
+    onStatus() {},
+    onFrame() {},
+    onHeartbeat: (cmd, n) => beats.push([cmd, n]),
+  };
+  const client = B.create(handlers);
+  client.connected = true;
+  const frames = [];
+  client.writeChar = {
+    writeValue: async (frame) => {
+      frames.push(Uint8Array.from(frame));
+      // 固件 peripheralEPDTaskCB() 推进度/完成通知时，帧里的 CMD 固定写 0x10（刷纯色那个）
+      handlers.onFrame({ cmd: 0x10, code: 0x01, data: new Uint8Array([1]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x10, 1, 0, 0x0d]) });
+      handlers.onFrame({ cmd: 0x10, code: 0x02, data: new Uint8Array([2]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x10, 2, 0, 0x0d]) });
+    },
+  };
+
+  const res = await client.updateImage(1);
+  ok(!!res, 'updateImage 等到完成帧后 resolve');
+  ok(frames.length === 1, 'updateImage 只写 1 次（完成即停，无重试）');
+  ok(
+    B.hex(frames[0]) === '55 AA 00 08 11 01 00 0D',
+    '0x11 帧格式 55 AA 00 08 11 01 00 0D（实际 ' + B.hex(frames[0]) + '）'
+  );
+  ok(
+    beats.length === 1 && beats[0][0] === 0x11 && beats[0][1] === 1,
+    '收到 0x01 心跳时以 0x11 上报 onHeartbeat'
+  );
+
+  const before = frames.length;
+  const bad = await client.updateImage(11).then(() => ({ ok: true }), (e) => ({ ok: false, msg: e.message }));
+  ok(!bad.ok && /0~10/.test(bad.msg), '槽号 11 直接拒绝');
+  ok(frames.length === before, '槽号非法时不发任何帧');
+}
+
+/* 16. updateImage（0x11）：忽略无关 CMD、BUSY 后重发 */
+{
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  let writes = 0;
+  let retries = 0;
+  client.writeChar = {
+    writeValue: async () => {
+      writes++;
+      if (writes === 1) {
+        // 先来一条别的命令（0x20）的完成帧：不能被当成 0x11 的结果
+        handlers.onFrame({ cmd: 0x20, code: 0x02, data: new Uint8Array([2]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x20, 2, 0, 0x0d]) });
+        handlers.onFrame({ cmd: 0x10, code: 0x03, data: new Uint8Array([3]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x10, 3, 0, 0x0d]) });
+        return;
+      }
+      handlers.onFrame({ cmd: 0x10, code: 0x02, data: new Uint8Array([2]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x10, 2, 0, 0x0d]) });
+    },
+  };
+  await client.updateImage(2, { onRetry: () => retries++ });
+  ok(writes === 2 && retries === 1, '无关 CMD 不误判完成；BUSY 后重发 1 次（写入 2 次）');
+}
+
 if (fail.length) {
   console.error('\n失败 ' + fail.length + ' 项');
   process.exit(1);

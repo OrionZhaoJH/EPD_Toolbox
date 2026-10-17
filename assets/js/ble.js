@@ -17,12 +17,16 @@
      0x00 读 IC 版本     55 AA 00 08 00 00 00 0D
                          → 应答 55 AA 00 0A 00 R1 R2 R3 00 0D（无响应码，PAYLOAD 即版本号）
      0x10 刷纯色         data[0] = 颜色编号 0~7
+     0x11 刷图           55 AA 00 08 11 [image_id] 00 0D
+                         → 把指定槽里已写入的图显示到屏上（先 0x20 擦 + 0x30 写）
      0x20 擦除图片槽     data[0] = image_id 0~10
      0x30 写图片分片     55 AA 00 F4 30 [id] [off H/M/L] [payload 233B] 00 0D
                          见 E6_P370_CH592F/BLE_Protocol.md，742 片存一张 480×720 4bpp 图
-   响应码（RESPONSE_CODE_t，仅 0x10 / 0x20 / 0x30 这类带状态应答的命令使用）：
+   响应码（RESPONSE_CODE_t，仅 0x10 / 0x11 / 0x20 / 0x30 这类带状态应答的命令使用）：
      0x00 成功 / 0x01 受理中(DOING) / 0x02 完成(DONE) / 0x03 忙 / 0xE0+ 各类错误
    注意：解析帧时不能一律把 PAYLOAD 首字节当响应码，读版本的应答首字节是版本号。
+   另注：固件 peripheralEPDTaskCB() 推送刷屏进度/完成通知时 CMD 字段写死为 0x10，
+         所以等 0x11 的应答必须把 CMD=0x10 的帧一起算（见 updateImage / acceptCmds）。
    ========================================================================== */
 (function (global) {
   'use strict';
@@ -34,6 +38,7 @@
   const CMD = {
     REVISION: 0x00,
     UPDATE_COLOR: 0x10,
+    UPDATE_IMAGE: 0x11,
     FLASH_ERASE: 0x20,
     WRITE_IMAGE: 0x30,
   };
@@ -59,7 +64,7 @@
     0xe5: '无效主命令',
     0xe6: '无效从命令',
     0xe7: '无效数据',
-    0xff: '未处理/默认错误',
+    0xff: '未处理/执行失败',
   };
 
   const ERR_CODE = {
@@ -308,6 +313,7 @@
       switch (cmd) {
         case CMD.REVISION: return '读版本';
         case CMD.UPDATE_COLOR: return '刷纯色';
+        case CMD.UPDATE_IMAGE: return '刷图';
         case CMD.FLASH_ERASE: return '擦除图片槽';
         case CMD.WRITE_IMAGE: return '写图片分片';
         default: return '0x' + cmd.toString(16).toUpperCase();
@@ -362,6 +368,10 @@
     client.sendFrameAndWait = function (frame, cmd, idleMs, opts) {
       return new Promise((resolve, reject) => {
         const idle = idleMs || client.settings.idleTimeout;
+        /* 本命令的响应 CMD 白名单：默认只有 cmd 自己；刷图（0x11）要额外接受 0x10，
+           因为固件 EPD 任务的通知把 CMD 字段写死成 0x10（peripheralEPDTaskCB），
+           刷图/刷纯色共用同一条通知帧。不接受的话等 0x11 永远等不到 DONE。 */
+        const accept = [cmd].concat((opts && opts.acceptCmds) || []);
         let timer = null;
         let heartbeat = 0;
         const prev = h.onFrame;
@@ -387,7 +397,7 @@
 
         h.onFrame = function (frame) {
           if (prev) prev(frame);
-          if (frame.cmd !== cmd) return;
+          if (accept.indexOf(frame.cmd) === -1) return;
           const code = frame.code;
           if (code === 0x01) {
             // DOING / 心跳保活：不结束，只续命并通知上层刷新进度
@@ -442,6 +452,36 @@
     client.updateColor = function (colorId, idleMs) {
       if (colorId < 0 || colorId > 7) return Promise.reject(new Error('颜色编号只能是 0~7'));
       return client.sendAndWait(CMD.UPDATE_COLOR, [colorId], idleMs || 20000);
+    };
+
+    /**
+     * 刷图：把某个槽里已经写好的 480×720 4bpp 数据刷到屏上（固件 EPD_MDOE_IMAGE）。
+     *   55 AA 00 08 11 [image_id] 00 0D
+     * 与刷纯色一样是异步的：先回 DOING(0x01)，刷屏期间持续推 0x01 心跳，刷完推
+     * DONE(0x02)，失败推 0xFF（RESPONSE_CODE_ERR），所以同样用空闲超时。
+     *
+     * ⚠️ 固件 quirk：peripheralEPDTaskCB() 里通知帧的 CMD 写死为 0x10，刷图的完成帧
+     *    到达时 CMD 也是 0x10，所以这里用 acceptCmds 把 0x10 一起接受，否则永远等不到 DONE。
+     *
+     * 调用前该槽必须已经写过图（0x20 擦 + 0x30 写），否则会刷出空白/残留内容。
+     *
+     * @param {number} imageId 0~10（固件 FLASH_IMAGE_MAX_COUNT = 11）
+     * @param {object} [opts]
+     *   idleMs  空闲超时，默认 20 s（与刷纯色一致）
+     *   attempts 命令级重试次数，默认 3；只有 BUSY(0x03) 这类可重试错误才重发
+     *   onRetry({attempt,error}) 重发前回调
+     */
+    client.updateImage = function (imageId, opts) {
+      const o = opts || {};
+      if (!(imageId >= 0 && imageId <= 10)) return Promise.reject(new Error('图片槽只能是 0~10'));
+      return withRetry(
+        () =>
+          client.sendAndWait(CMD.UPDATE_IMAGE, [imageId], o.idleMs || 20000, {
+            acceptCmds: [CMD.UPDATE_COLOR],
+          }),
+        o.attempts || 3,
+        o.onRetry
+      );
     };
 
     client.eraseSlot = function (imageId, opts) {

@@ -41,7 +41,7 @@ try { await client.xxx(); } catch (e) { ... } finally { busy = false; setCommand
 - E6 整屏刷新实测十几秒到几十秒，固定 15 s 总超时会误判失败；
 - 固件在刷屏期间持续重复回 `RESPONSE_CODE_DOING`（`55 AA 00 08 10 01 00 0D`）当心跳；
 - 所以 `sendAndWait()` 每收到一帧同 `CMD` 的响应就重置计时器：
-  刷纯色 20 s、擦除 60 s 收不到任何帧才失败；
+  刷纯色 / 刷图 20 s、擦除 60 s 收不到任何帧才失败；
 - 心跳帧不逐条写日志（几十上百条会把日志冲掉），只在第一次心跳补一条说明；
   界面用 `onHeartbeat(cmd, count)` 刷进度。
 
@@ -66,26 +66,48 @@ try { await client.xxx(); } catch (e) { ... } finally { busy = false; setCommand
 - **742 片不逐条写日志**：`client.silentCmd` 让该 cmd 的收发静默，进度交给进度条；
   否则日志被冲掉、页面也会卡。
 - 送图期间同样 `setCommandLock(true)`，并提供「中止」（`shouldStop` 每片检查一次）。
+- 送完图默认接着发 `0x11` 把这一槽刷到屏上（送图卡片「送完自动刷图」复选框，可关掉）；
+  只写 flash 不会显示，槽里没数据时 `0x11` 只会刷出空白。
 
-## 4. 帧解析不要假定 PAYLOAD 首字节是响应码
+## 4. 刷图（`0x11`）的完成通知 CMD 是 `0x10`（固件约定）
 
-- `0x10` / `0x20` 的 PAYLOAD 首字节是响应码（`0x00` 成功 / `0x01` 受理·心跳 / `0x02` 完成 / `0x03` 忙 / `0xE0+` 错误）；
+固件 `peripheralEPDTaskCB()`（`E6_P370_CH592F/App/peripheral.c`）推送刷屏进度 / 完成通知时，
+把帧里的 CMD **写死为 `CHAR3_CMD_10_UPDATE_COLOR`**，刷纯色和刷图共用同一条 8 字节通知：
+
+```
+55 AA 00 08 10 [01 心跳 | 02 完成 | FF 失败] 00 0D
+```
+
+所以等 `0x11` 的应答时**必须把 `CMD=0x10` 的帧一起算**，否则永远等不到 `0x02`：
+
+- `ble.js` 的 `sendFrameAndWait()` 支持 `opts.acceptCmds`（额外接受的 CMD 列表），
+  匹配判定为 `const accept = [cmd].concat((opts && opts.acceptCmds) || []);`；
+- `updateImage(imageId, opts)` 固定带 `acceptCmds: [CMD.UPDATE_COLOR]`，外层还包了
+  `withRetry()`（`0x11` 收到 `0x03` 表示任务队列满，可重试）；
+- 别把这套抄给 `0x20` / `0x30`：`peripheralFlashTaskCB()` 的通知 CMD 是按操作区分的
+  （擦除回 `0x20`、写片回 `0x30`），乱加接受项反而会串包；
+- `acceptCmds` 只加同名通知，不要写成「接受所有 CMD」；顺带用测试把
+  「无关 CMD 的完成帧不能误判成功」钉住（`tests/ble.test.mjs` 第 16 组）。
+
+## 5. 帧解析不要假定 PAYLOAD 首字节是响应码
+
+- `0x10` / `0x11` / `0x20` / `0x30` 的 PAYLOAD 首字节是响应码（`0x00` 成功 / `0x01` 受理·心跳 / `0x02` 完成 / `0x03` 忙 / `0xE0+` 错误）；
 - `0x00` 读版本的应答**没有响应码**：`55 AA 00 0A 00 10 84 02 00 0D` 里 `10 84 02` 就是版本号，
   曾经按「首字节=响应码」解析，报出过「未知响应 0x10」；
 - `parseStream()` 只负责切帧，语义交给各命令自己处理：读版本单走 `readRevision()`。
 
-## 5. 状态显示
+## 6. 状态显示
 
 - 徽章只显示三态短文案：未连接 / 连接中… / 已连接，设备名单独放在右侧，不重复；
 - 滚动后顶栏出现同一状态的徽章（`#bleStatusTop`），回到顶部自动隐藏；
 - 命令卡片各自带一个小状态徽章：未执行 / 执行中（带耗时、心跳数）/ 成功 / 失败。
 
-## 6. 移动端
+## 7. 移动端
 
 - ≤640px：单列布局、表单项独占一行、输入框字号 ≥16px（防 iOS 聚焦放大）、
   顶栏按钮收成图标（`.btn-label` 隐藏）、表格包 `.table-wrap` 横向滚动。
 
-## 7. 提交前自检
+## 8. 提交前自检
 
 ```bash
 node --check assets/js/*.js
