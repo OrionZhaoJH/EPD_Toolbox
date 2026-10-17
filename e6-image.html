@@ -208,7 +208,9 @@
            送图与刷图共用同一个图片槽下拉 #slotSelect（先写哪槽、再刷哪槽，不用来回切）：
            - 送图 #btnSend：0x20 擦除同槽等 DONE → 0x30 逐片写（233 字节 × 742 片，帧 244 字节）；
            - 刷图 #btnRefresh：0x11 把该槽已经写好的图刷到屏上，不改 Flash 内容；
+           - 自动刷图 #refreshAfter：勾上后送图写完最后一片会接着发 0x11，默认不勾；
            - 中止 #btnCancelSend：送图过程中在下一片前停下（已写入的分片保持不动）。
+           按钮文案只写「送图 / 刷图」，命令码放在下面的帧预览行（#sendFrame / #refreshFrame）里看。
            连接不在这张卡片里：连接 / 断开与状态徽章放在顶部工具条（和 ble-console.html 一致），
            控件在页面顶部：#bleState / #bleStateText / #bleDeviceName / #btnConnect / #btnDisconnect。
            两个命令互斥（docs/conventions.md §1）：任一条执行中，连接以外的命令控件全部禁用。
@@ -230,8 +232,8 @@
           <div class="form-group" style="flex:0 0 auto;">
             <label>&nbsp;</label>
             <div class="row">
-              <button class="btn btn-primary" id="btnSend" type="button" disabled>送图（0x30）</button>
-              <button class="btn" id="btnRefresh" type="button" disabled>刷图（0x11）</button>
+              <button class="btn btn-primary" id="btnSend" type="button" disabled>送图</button>
+              <button class="btn" id="btnRefresh" type="button" disabled>刷图</button>
               <button class="btn" id="btnCancelSend" type="button" disabled>中止</button>
             </div>
           </div>
@@ -243,6 +245,14 @@
               <span class="kv">耗时 <b id="sendMs">—</b></span>
             </div>
           </div>
+        </div>
+
+        <!-- 自动刷图：勾上后「送图」写完最后一片会接着发 0x11 把这一槽显示出来；
+             默认不勾——有人只想先把图存进 Flash，稍后再刷 -->
+        <div class="check-row" style="margin-top:10px;">
+          <input type="checkbox" id="refreshAfter">
+          <label for="refreshAfter">送完自动刷图</label>
+          <span class="kv">不勾选只写 Flash，屏上不会有变化</span>
         </div>
 
         <div class="progress" style="margin-top:14px;"><i id="sendBar"></i></div>
@@ -257,7 +267,8 @@
         <p class="hint" style="margin-top:8px;">
           先在右上角<b>连接 BLE</b>。连上后同一个槽位下拉框先后发两条命令：
           <b>送图</b>先 <code>0x20</code> 擦除该槽、再 <code>0x30</code> 逐片写（233 字节 × 742 片，每片等 DONE），
-          只把数据写进 Flash，<b>屏上不会有变化</b>；要显示再点<b>刷图</b>（<code>0x11</code>）。
+          只把数据写进 Flash，<b>屏上不会有变化</b>；要显示再点<b>刷图</b>（<code>0x11</code>），
+          勾上<b>送完自动刷图</b>则送完立刻接着刷。
           槽里没数据（刚擦除过）时刷图只会刷出空白。
           244 字节的写需要 ATT MTU ≥ 247，Web Bluetooth 没有主动请求 MTU 的接口，Chrome 会自动协商。
         </p>

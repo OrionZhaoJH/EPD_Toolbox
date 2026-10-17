@@ -71,6 +71,7 @@
     btnSend: $('btnSend'),
     btnRefresh: $('btnRefresh'),
     btnCancelSend: $('btnCancelSend'),
+    refreshAfter: $('refreshAfter'),
     sendState: $('sendState'),
     sendMs: $('sendMs'),
     sendBar: $('sendBar'),
@@ -181,6 +182,7 @@
     el.slotSelect.disabled = !usable;
     el.btnSend.disabled = !usable || !imageReady();
     el.btnRefresh.disabled = !usable;
+    el.refreshAfter.disabled = !usable; // 只是开关，同样在命令执行中锁住，免得中途改主意
     if (!usable) el.btnCancelSend.disabled = true;
     updateFrames();
   }
@@ -538,7 +540,7 @@
 
   el.slotSelect.addEventListener('change', updateFrames);
 
-  /* ---------------- 送图（0x30）：擦除同槽 → 逐片写 ---------------- */
+  /* ---------------- 送图（0x30）：擦除同槽 → 逐片写（勾了自动刷图则写完接着发 0x11） ---------------- */
   el.btnSend.addEventListener('click', async () => {
     if (!client) return;
     if (state.sending) return log('sys', '上一条命令还在执行，稍等');
@@ -557,6 +559,7 @@
     setSendProgress(0, '准备中…');
     const t0 = performance.now();
     let retries = 0;
+    let uploaded = false; // 数据是否已写进 Flash：刷图失败时靠它区分「全失败」与「只是没显示出来」
 
     try {
       // 1) 先擦除目标槽并等 DONE —— 协议要求写图前槽是干净的
@@ -597,26 +600,44 @@
         },
       });
 
+      // 送图成功：数据已经在 Flash 里了。勾了「送完自动刷图」就接着发 0x11 把这一槽显示出来
+      uploaded = true;
+      let shown = false;
+      if (el.refreshAfter.checked) {
+        el.btnCancelSend.disabled = true; // 中止只作用于分片写入，刷图阶段不再需要
+        setSendState('running', '刷图中…');
+        setSendProgress(1, '送图完成 · 正在刷图（0x11 · 槽 ' + slot + '）…');
+        log('sys', '开始刷图：0x11 槽 ' + slot + '（该命令的完成通知 CMD 是 0x10，属固件约定）');
+        await client.updateImage(slot, {
+          onRetry: (info) => log('sys', '刷图第 ' + info.attempt + ' 次失败（' + info.error.message + '），重发'),
+        });
+        shown = true;
+      }
+
       const sec = (performance.now() - t0) / 1000;
       el.sendMs.textContent = sec.toFixed(1) + ' s';
       setSendProgress(
         1,
         '完成：' + res.chunks + ' 片 / ' + res.bytes.toLocaleString() + ' 字节' +
-          (retries ? ' · 重试 ' + retries + ' 次' : '') + ' · 已落盘，点「刷图」显示'
+          (retries ? ' · 重试 ' + retries + ' 次' : '') +
+          (shown ? ' · 已刷图' : ' · 已落盘，点「刷图」显示')
       );
-      setSendState('ok', '完成 · 槽 ' + slot + ' 已写入');
+      setSendState('ok', shown ? '完成 · 槽 ' + slot + ' 已显示' : '完成 · 槽 ' + slot + ' 已写入');
       log(
         'ok',
         '送图完成：槽 ' + slot + '，' + res.chunks + ' 片，' + sec.toFixed(1) + ' s' +
-          (retries ? '，重试 ' + retries + ' 次' : '') + '（数据已落盘，点「刷图」才会显示）'
+          (retries ? '，重试 ' + retries + ' 次' : '') +
+          (shown ? '，已自动刷图显示' : '（数据已落盘，点「刷图」才会显示）')
       );
     } catch (err) {
       const sec = (performance.now() - t0) / 1000;
       el.sendMs.textContent = sec.toFixed(1) + ' s';
       const aborted = sendAbort;
-      setSendState('err', aborted ? '已中止' : '失败');
-      setSendProgress(0, (aborted ? '中止' : '送图失败') + '：' + err.message);
-      log('err', (aborted ? '已中止' : '送图失败') + '：' + err.message);
+      // 刷图失败时 742 片其实已经写好了：不能报成「送图失败」，否则用户会白重送一遍
+      const what = aborted ? '已中止' : uploaded ? '送图成功但刷图失败' : '送图失败';
+      setSendState('err', aborted ? '已中止' : uploaded ? '送图完成 · 刷图失败' : '失败');
+      setSendProgress(0, what + '：' + err.message);
+      log('err', what + '：' + err.message + (uploaded ? '（图片数据已落盘，可点「刷图」再试）' : ''));
     } finally {
       state.sending = false;
       setCommandLock(false);
@@ -697,7 +718,7 @@
     el.btnConnect.disabled = true;
     log('sys', '当前浏览器不支持 Web Bluetooth：可以转换和导出，但不能送图 / 刷图。请用 Chrome / Edge（HTTPS 或 localhost）');
   } else {
-    log('sys', '送图 / 刷图已就绪：连接设备后，同一个槽位下拉框先后「送图（0x30）」「刷图（0x11）」');
+    log('sys', '送图 / 刷图已就绪：连接设备后，同一个槽位下拉框先后「送图（0x30）」「刷图（0x11）」，勾「送完自动刷图」可一步到屏');
   }
 
   /* 演示模式：?demo=1 时生成一张测试图，方便没有素材时验证效果 */
