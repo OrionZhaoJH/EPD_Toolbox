@@ -151,6 +151,7 @@
   function setBleConnected(on) {
     el.btnConnect.disabled = on;
     el.btnDisconnect.disabled = !on;
+    el.nameFilter.disabled = on; // 已连接后前缀不再生效，和 BLE 命令测试页一致
     if (!on) locked = false; // 断开时清锁，避免重连后一直锁着
     applyCommandEnabled();
   }

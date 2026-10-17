@@ -19,7 +19,7 @@
       <span class="topbar-title"><span class="icon">📶</span> BLE 命令测试</span>
     </div>
     <div class="topbar-right">
-      <span class="badge off" id="bleStatusTop"><span id="bleStatusTopText">未连接</span></span>
+      <span class="badge off" id="bleStatus"><span class="badge-device" id="bleDeviceName"></span><span id="bleStatusText">未连接</span></span>
       <button class="btn btn-primary btn-sm" id="btnConnect" type="button" title="连接 BLE 设备">
         <span class="btn-ico">🔗</span><span class="btn-label">连接 BLE</span>
       </button>
@@ -30,7 +30,16 @@
   </div>
 
   <header class="page-head">
-    <h1><span class="icon">📶</span> BLE 命令测试</h1>
+    <div class="page-head-row">
+      <h1><span class="icon">📶</span> BLE 命令测试</h1>
+      <!-- 名称前缀过滤框：与图像转换页同一套写法，连接时按设备名前缀筛设备 -->
+      <div class="title-filter">
+        <label for="nameFilter">名称前缀</label>
+        <input type="text" id="nameFilter" value="EPD" placeholder="留空列出全部"
+               autocomplete="off" spellcheck="false"
+               title="连接时按设备名前缀过滤（留空则列出全部设备）">
+      </div>
+    </div>
     <p>
       逐条下发固件已实现的 CHAR3 命令并观察响应。命令帧统一为 <code>55 AA LEN_H LEN_L CMD DATA CRC 0D</code>，
       响应经 FFE4 通知回传；异步命令（刷纯色 / 刷图 / 擦除）会先回 <code>0x01 受理</code>，完成后推送 <code>0x02 完成</code>。
@@ -41,30 +50,15 @@
     ⚠️ 当前浏览器不支持 Web Bluetooth API。请使用 Chrome / Edge（HTTPS 或 localhost 访问）。
   </div>
 
-  <!-- 连接 -->
+  <!-- 高级连接参数：平时折叠着，只有要改 FFE0/FFE3/FFE4 时才展开。
+       连接按钮与状态徽章都在顶栏，这里不再重复放输入框和状态。 -->
   <section class="card" style="margin-bottom:18px;">
-    <div class="card-title">
-      <span>连接</span>
-      <span class="sub">FFE0 服务 · FFE3 写 · FFE4 通知</span>
-    </div>
-    <div class="row" style="align-items:flex-end;">
-      <div class="form-group" style="flex:0 1 220px;">
-        <label for="nameFilter">设备名称前缀</label>
-        <input type="text" id="nameFilter" placeholder="留空则列出全部设备" value="EPD" autocomplete="off">
-      </div>
-      <div class="form-group" style="flex:0 0 auto;">
-        <label>连接状态</label>
-        <div class="control-line">
-          <span class="badge off" id="bleStatus"><span id="bleStatusText">未连接</span></span>
-          <span class="kv" id="bleDeviceName"></span>
-        </div>
-      </div>
-      <span class="spacer"></span>
-    </div>
-
-    <details style="margin-top:12px;">
-      <summary class="hint" style="cursor:pointer;">高级：自定义服务 / 特征 UUID</summary>
-      <div class="form-row" style="margin-top:10px;">
+    <details>
+      <summary class="card-title" style="cursor:pointer;margin-bottom:0;">
+        <span>高级：自定义服务 / 特征 UUID</span>
+        <span class="sub">默认 FFE0 服务 · FFE3 写 · FFE4 通知</span>
+      </summary>
+      <div class="form-row" style="margin-top:12px;">
         <div class="form-group">
           <label for="uuidService">服务 UUID</label>
           <input type="text" id="uuidService" value="ffe0" autocomplete="off" spellcheck="false">

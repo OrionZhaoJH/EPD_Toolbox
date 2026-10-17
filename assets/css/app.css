@@ -148,29 +148,11 @@ code, kbd, pre { font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monos
   justify-content: flex-end;
 }
 
-/* 顶栏连接状态：默认隐藏（下方已有一行完整状态），滚动后标题收起时再出现 */
-#bleStatusTop { display: none; }
-.topbar.scrolled #bleStatusTop { display: inline-flex; }
-
-/* 顶栏里的设备名（e6-image.html）：过长省略，窄屏直接隐藏，别把连接按钮挤到第二行 */
-.topbar-device { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 640px) { .topbar-device { display: none; } }
-
-/* 顶栏里的名称前缀过滤框（e6-image.html）：与连接按钮同一行；窄屏收起，退回列出全部设备 */
-.topbar-filter {
-  width: 112px;
-  padding: 4px 8px;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-}
-.topbar-filter:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
-.topbar-filter:disabled { opacity: .55; }
-@media (max-width: 640px) { .topbar-filter { display: none; } }
+/* 连接状态徽章里的设备名（e6-image.html / ble-console.html）：放在「已连接」左边，
+   过长省略；窄屏只留状态词，避免徽章把连接按钮挤到第二行 */
+.badge-device { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.badge-device:not(:empty)::after { content: ' · '; }
+@media (max-width: 640px) { .badge-device { display: none; } }
 
 @media (max-width: 640px) {
   body { padding: 12px 14px 32px; }
@@ -190,6 +172,23 @@ header.page-head h1 {
 }
 header.page-head h1 .icon { font-size: 1.5rem; }
 header.page-head p { color: var(--text-muted); margin-top: 6px; font-size: .92rem; max-width: 78ch; }
+
+/* 标题右侧的小控件行（如「名称前缀」过滤框）：与 h1 基线对齐，窄屏换行到标题下方 */
+.page-head-row { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
+.title-filter { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--text-muted); white-space: nowrap; }
+/* 用 [type="text"] 提高优先级，压过下面的全局 input[type="text"] { width:100% } */
+.title-filter input[type="text"] {
+  width: 104px;
+  padding: 3px 8px;
+  font-size: .8rem;
+  line-height: 1.5;
+  border-radius: 8px;
+}
+.title-filter input[type="text"]:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.title-filter input[type="text"]:disabled { opacity: .55; }
+@media (max-width: 640px) {
+  .title-filter { display: none; } /* 窄屏放不下，连接时退回「列出全部设备」 */
+}
 
 /* --------------------------------------------------------------------------
    按钮

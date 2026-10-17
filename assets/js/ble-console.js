@@ -21,10 +21,9 @@
   const el = {
     topbar: $('topbar'),
     bleWarn: $('bleWarn'),
+    // 连接状态徽章在顶栏：设备名在「已连接」左边（.badge-device），不再维护页内第二份状态
     bleStatus: $('bleStatus'),
     bleStatusText: $('bleStatusText'),
-    bleStatusTop: $('bleStatusTop'),
-    bleStatusTopText: $('bleStatusTopText'),
     bleDeviceName: $('bleDeviceName'),
     nameFilter: $('nameFilter'),
     uuidService: $('uuidService'),
@@ -126,12 +125,10 @@
     const connected = st === 'connected';
     const label = connected ? '已连接' : st === 'connecting' ? '连接中…' : '未连接';
     const cls = 'badge ' + (connected ? 'ok' : st === 'connecting' ? 'ready' : 'off');
-    [el.bleStatus, el.bleStatusTop].forEach((badge) => {
-      badge.className = cls;
-      badge.title = fullText || label;
-    });
+    // 徽章只有顶栏这一处：设备名在同一徽章内、位于状态词左边
+    el.bleStatus.className = cls;
+    el.bleStatus.title = fullText || label;
     el.bleStatusText.textContent = label;
-    el.bleStatusTopText.textContent = label;
   }
 
   /** 命令卡片右上角的小状态：「未执行 / 执行中… / 成功 / 失败」 */
