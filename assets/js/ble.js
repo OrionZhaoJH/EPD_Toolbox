@@ -59,7 +59,9 @@
     serviceUuid: 0xffe0,
     writeUuid: 0xffe3,
     notifyUuid: 0xffe4,
-    responseTimeout: 4000,
+    /* 空闲超时：不是总耗时上限。刷屏期间固件每秒左右发一次 0x01 心跳，
+       只要心跳不断就一直等；连续这么久没收到任何同 cmd 的帧才判超时。 */
+    idleTimeout: 20000,
   };
 
   /** 十六进制字符串 → 期望的 16 位 UUID 形式（蓝牙标准写法 0000xxxx-0000-1000-8000-00805f9b34fb 可省略） */
@@ -226,6 +228,9 @@
       for (let i = 0; i < bytes.length; i++) client.rx.push(bytes[i]);
       parseStream(client.rx, (frame) => {
         client.lastFrame = frame;
+        // 心跳（0x01）几十上百条，不逐条记日志，避免把日志冲掉；
+        // 页面通过 onHeartbeat 只在第一次心跳时补一条说明
+        if (frame.code !== 0x01) log('rx', '接收 ' + hex(frame.raw));
         if (h.onFrame) h.onFrame(frame);
       }, log);
     }
@@ -258,30 +263,56 @@
     };
 
     /**
-     * 发送命令并等待指定 cmd 的最终响应（DONE / ERR）。
+     * 发送命令并等待最终响应（DONE / ERR）。
+     *
      * 刷纯色与擦除属于异步命令：先回 DOING(0x01)，完成后再推 DONE(0x02)。
+     * 整屏刷新可能十几秒到几十秒，固件会在刷屏期间**持续重复发 0x01 做心跳保活**
+     * （55 AA 00 08 10 01 00 0D），所以这里用的是「空闲超时」：
+     * 每收到一帧同 cmd 的响应就重置计时器，只要心跳不断就一直等下去，
+     * 而不是拿一个固定总超时去卡一次几十秒的刷新。
      */
-    client.sendAndWait = function (cmd, data, timeout) {
+    client.sendAndWait = function (cmd, data, idleMs) {
       return new Promise((resolve, reject) => {
+        const idle = idleMs || client.settings.idleTimeout;
         let timer = null;
+        let heartbeat = 0;
         const prev = h.onFrame;
         const finish = (fn, arg) => {
           clearTimeout(timer);
           h.onFrame = prev;
           fn(arg);
         };
-        timer = setTimeout(() => finish(reject, new Error('等待响应超时（' + client.cmdName(cmd) + '）')), timeout || client.settings.responseTimeout);
+        const arm = () => {
+          clearTimeout(timer);
+          timer = setTimeout(
+            () =>
+              finish(
+                reject,
+                new Error(
+                  '等待响应超时（' + client.cmdName(cmd) + '）：' + idle / 1000 + ' s 内没有收到任何帧' +
+                    (heartbeat ? '，上次心跳 #' + heartbeat : '')
+                )
+              ),
+            idle
+          );
+        };
 
         h.onFrame = function (frame) {
           if (prev) prev(frame);
           if (frame.cmd !== cmd) return;
           const code = frame.code;
-          if (code === 0x00) finish(resolve, frame); // 立即成功
-          else if (code === 0x02) finish(resolve, frame); // 异步完成
-          else if (code === 0x01) return; // DOING，继续等
+          if (code === 0x01) {
+            // DOING / 心跳保活：不结束，只续命并通知上层刷新进度
+            heartbeat++;
+            arm();
+            if (h.onHeartbeat) h.onHeartbeat(cmd, heartbeat);
+            return;
+          }
+          if (code === 0x00 || code === 0x02) finish(resolve, frame);
           else finish(reject, new Error(client.responseText(code) + '（0x' + code.toString(16).toUpperCase() + '）'));
         };
 
+        arm();
         client.send(cmd, data).catch((err) => finish(reject, err));
       });
     };
@@ -313,14 +344,15 @@
       });
     };
 
-    client.updateColor = function (colorId) {
+    client.updateColor = function (colorId, idleMs) {
       if (colorId < 0 || colorId > 7) return Promise.reject(new Error('颜色编号只能是 0~7'));
-      return client.sendAndWait(CMD.UPDATE_COLOR, [colorId], 15000);
+      return client.sendAndWait(CMD.UPDATE_COLOR, [colorId], idleMs || 20000);
     };
 
-    client.eraseSlot = function (imageId) {
+    client.eraseSlot = function (imageId, idleMs) {
       if (imageId < 0 || imageId > 10) return Promise.reject(new Error('图片槽只能是 0~10'));
-      return client.sendAndWait(CMD.FLASH_ERASE, [imageId], 20000);
+      // 擦除没有心跳，只能给一个更宽的空闲上限
+      return client.sendAndWait(CMD.FLASH_ERASE, [imageId], idleMs || 60000);
     };
 
     return client;

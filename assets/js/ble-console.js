@@ -56,6 +56,30 @@
   let selectedColor = 0; // 默认黑
   let busy = false; // 同一时刻只跑一条命令，避免响应互相顶掉
 
+  /* 长命令（刷屏可能几十秒）的进度：每 200ms 刷一次徽章，显示耗时与心跳次数 */
+  let ticker = null;
+  let cmdStart = 0;
+  let hbCount = 0;
+
+  function startProgress(badge, prefix) {
+    stopProgress();
+    cmdStart = performance.now();
+    hbCount = 0;
+    const paint = () => {
+      const s = ((performance.now() - cmdStart) / 1000).toFixed(1);
+      setCmdState(badge, 'running', prefix + ' ' + s + ' s' + (hbCount ? ' · 心跳 ' + hbCount : ''));
+    };
+    paint();
+    ticker = setInterval(paint, 200);
+  }
+
+  function stopProgress() {
+    if (ticker) {
+      clearInterval(ticker);
+      ticker = null;
+    }
+  }
+
   /* ---------------- 日志 ---------------- */
   function log(type, text) {
     const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
@@ -168,12 +192,13 @@
       const connected = st === 'connected';
       setConnected(connected);
       el.bleDeviceName.textContent = connected && client.device ? client.device.name || '' : '';
+      if (!connected) stopProgress();
     },
-    onFrame: (frame) => {
-      // 异步命令的中间态：设备已受理，正在刷屏 / 擦除
-      if (frame.code === 0x01) {
-        if (frame.cmd === CMD.UPDATE_COLOR) setCmdState(el.colorState, 'running', '刷屏中…');
-        if (frame.cmd === CMD.FLASH_ERASE) setCmdState(el.eraseState, 'running', '擦除中…');
+    onHeartbeat: (cmd, count) => {
+      // 刷屏期间固件持续发 0x01 保活：不算失败，只用来续命 + 刷新进度
+      hbCount = count;
+      if (count === 1) {
+        log('sys', (cmd === CMD.UPDATE_COLOR ? '刷屏' : '擦除') + '仍在进行，收到设备心跳（保持等待）');
       }
     },
   });
@@ -238,16 +263,18 @@
 
     const color = Codec.PALETTE.find((c) => c.id === id);
     busy = true;
-    setCmdState(el.colorState, 'running', '执行中…');
+    startProgress(el.colorState, '刷屏中');
     const t0 = performance.now();
     try {
       await client.updateColor(id);
       const ms = Math.round(performance.now() - t0);
+      stopProgress();
       el.colorMs.textContent = ms + ' ms';
       setCmdState(el.colorState, 'ok', '完成 · ' + (color ? color.name : 'id ' + id));
-      log('ok', '刷纯色完成：' + (color ? color.name : 'id ' + id) + '（' + ms + ' ms）');
+      log('ok', '刷纯色完成：' + (color ? color.name : 'id ' + id) + '（' + (ms / 1000).toFixed(1) + ' s，心跳 ' + hbCount + ' 次）');
     } catch (err) {
       const ms = Math.round(performance.now() - t0);
+      stopProgress();
       el.colorMs.textContent = ms + ' ms';
       setCmdState(el.colorState, 'err', '失败');
       log('err', '刷纯色失败：' + err.message);
@@ -265,16 +292,18 @@
       return;
     }
     busy = true;
-    setCmdState(el.eraseState, 'running', '执行中…');
+    startProgress(el.eraseState, '擦除中');
     const t0 = performance.now();
     try {
       await client.eraseSlot(slot);
       const ms = Math.round(performance.now() - t0);
+      stopProgress();
       el.eraseMs.textContent = ms + ' ms';
       setCmdState(el.eraseState, 'ok', '完成');
-      log('ok', '擦除槽 ' + slot + ' 完成（' + ms + ' ms）');
+      log('ok', '擦除槽 ' + slot + ' 完成（' + (ms / 1000).toFixed(1) + ' s）');
     } catch (err) {
       const ms = Math.round(performance.now() - t0);
+      stopProgress();
       el.eraseMs.textContent = ms + ' ms';
       setCmdState(el.eraseState, 'err', '失败');
       log('err', '擦除槽 ' + slot + ' 失败：' + err.message);

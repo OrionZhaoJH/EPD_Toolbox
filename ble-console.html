@@ -112,8 +112,9 @@
           <span class="sub">CHAR3_CMD_10_UPDATE_COLOR</span>
         </div>
         <p class="hint">
-          点击颜色即下发（color_id 0~7，E6 面板实际只有 6 种）。整屏刷新约 1~2 秒，
-          期间设备回 <code>0x01</code>，刷完再推 <code>0x02</code>。
+          点击颜色即下发（color_id 0~7，E6 面板实际只有 6 种）。刷屏可能十几秒到几十秒，
+          期间设备会<b>持续重复发 0x01 心跳</b>（<code class="mono">55 AA 00 08 10 01 00 0D</code>），
+          页面按心跳续命并显示耗时与心跳次数；连续 20 s 收不到任何帧才判超时，刷完推 <code>0x02</code>。
         </p>
 
         <div class="cmd-grid" id="colorGrid"></div>
@@ -138,7 +139,7 @@
         </div>
         <p class="hint">
           擦除指定槽位的图片数据（每槽 172800 字节，按 4096 对齐占 43 个扇区），
-          耗时数秒，执行前会二次确认。
+          执行前会二次确认。擦除没有心跳，页面按 60 s 空闲上限等待完成。
         </p>
 
         <div class="row" style="align-items:flex-end; margin-top:12px;">

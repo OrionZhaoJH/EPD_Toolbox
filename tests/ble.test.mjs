@@ -113,6 +113,57 @@ console.log('BLE 组帧与解析自测');
   ok(!res.ok && /超时/.test(res.msg), '设备无应答时按超时拒绝');
 }
 
+/* 8. 心跳续命：DOING(0x01) 不断时，总耗时超过空闲超时也不判失败 */
+{
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const raw = (code) => new Uint8Array([0x55, 0xaa, 0x00, 0x08, 0x10, code, 0x00, 0x0d]);
+  let beats = 0;
+  const handlers = {
+    onLog() {},
+    onStatus() {},
+    onFrame() {},
+    onHeartbeat(cmd, n) {
+      beats = n;
+    },
+  };
+  const client = B.create(handlers);
+  client.connected = true;
+  client.writeChar = { writeValue: async () => {} };
+
+  // 空闲超时 150ms，心跳每 60ms 一次共 5 次（累计 300ms），再推 DONE
+  const pending = client.updateColor(0x01, 150);
+  for (let i = 0; i < 5; i++) {
+    await sleep(60);
+    handlers.onFrame({ cmd: 0x10, code: 0x01, data: new Uint8Array([1]), raw: raw(0x01) });
+  }
+  handlers.onFrame({ cmd: 0x10, code: 0x02, data: new Uint8Array([2]), raw: raw(0x02) });
+
+  const res = await pending.then(
+    (f) => ({ ok: true, f }),
+    (e) => ({ ok: false, e })
+  );
+  ok(res.ok, '刷屏期间心跳不断，总耗时超过空闲超时也能等到 DONE');
+  ok(beats === 5, 'onHeartbeat 逐条计数（收到 ' + beats + ' 次）');
+}
+
+/* 9. 心跳停止后按空闲超时失败 */
+{
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {}, onHeartbeat() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  client.writeChar = { writeValue: async () => {} };
+
+  const pending = client.updateColor(0x02, 120);
+  handlers.onFrame({ cmd: 0x10, code: 0x01, data: new Uint8Array([1]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x10, 1, 0, 0x0d]) });
+  const res = await pending.then(
+    () => ({ ok: true }),
+    (e) => ({ ok: false, msg: e.message })
+  );
+  ok(!res.ok && /超时/.test(res.msg), '心跳停掉后 ' + 120 + 'ms 无新帧即失败');
+  await sleep(10);
+}
+
 if (fail.length) {
   console.error('\n失败 ' + fail.length + ' 项');
   process.exit(1);
