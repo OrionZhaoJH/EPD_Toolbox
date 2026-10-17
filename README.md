@@ -33,8 +33,12 @@
 
 通用：
 
+- 命令执行期间**禁用所有命令交互控件**，完成 / 超时 / 出错后恢复（避免并发下发被固件丢弃）
 - 连接状态三态显示（未连接 / 连接中… / 已连接），滚动后顶栏常驻状态徽章
 - 移动端适配：单列布局、表单项独占一行、顶栏按钮收成图标、表格横向滚动
+
+> 交互与通信的约定（命令互斥、空闲超时、帧语义、移动端…）见 [docs/conventions.md](docs/conventions.md)，
+> 新增页面或命令前请先过一遍。
 
 ## 目录结构
 
@@ -50,6 +54,7 @@ EPD_Toolbox/
 │       ├── ble.js                 # Web Bluetooth 封装 + 命令帧
 │       ├── e6-page.js             # 图像页交互
 │       └── ble-console.js         # 命令测试页交互
+├── docs/conventions.md            # 交互与通信约定（备忘录）
 ├── tests/codec.test.mjs           # 编解码自测（node 直接跑）
 └── .github/workflows/deploy-pages.yml
 ```
