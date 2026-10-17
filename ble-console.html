@@ -85,6 +85,10 @@
     <!-- ============ 第一行：0x00 读版本 / 0x10 刷纯色 ============ -->
     <div class="col">
 
+      <!-- ============ 0x00 · 读 IC 版本 ============
+           同步命令：发送 55 AA 00 08 00 00 00 0D，应答没有响应码，PAYLOAD 就是 3 字节版本号。
+           控件：按钮 #btnRev，状态 #revState，耗时 #revMs，发送帧 #revFrame，结果 #revResult。
+           结果框只放版本号本身，完整响应帧看底部收发日志；逻辑见 ble-console.js「0x00 读版本」段。 -->
       <section class="card">
         <div class="card-title">
           <span>0x00 · 读 IC 版本</span>
@@ -109,6 +113,10 @@
 
     <div class="col">
 
+      <!-- ============ 0x10 · 刷纯色 ============
+           异步命令：55 AA 00 09 10 [color_id] [CRC] 0D（帧长 9，color_id 0~7，E6 面板实际 6 色）。
+           设备先回 0x01 受理，刷屏期间持续推 0x01 心跳（8 字节，CMD 仍是 0x10），刷完推 0x02。
+           控件：颜色块 #colorGrid（点一下即发），状态 #colorState，耗时 #colorMs，发送帧 #colorFrame。 -->
       <section class="card">
         <div class="card-title">
           <span>0x10 · 刷纯色</span>
@@ -137,6 +145,11 @@
     <!-- ============ 第二行：0x11 刷图 / 0x20 擦除 ============ -->
     <div class="col">
 
+      <!-- ============ 0x11 · 刷图（显示指定槽的图） ============
+           异步命令：55 AA 00 08 11 [image_id] [CRC] 0D（帧长 8，image_id 0~10）。
+           固件 quirk：进度 / 完成通知的 CMD 字段固定写 0x10（peripheralEPDTaskCB），
+           ble.js 用 acceptCmds: [CMD.UPDATE_COLOR] 兼容，详见 docs/conventions.md §4。
+           控件：槽位 #imgSlotSelect + 按钮 #btnUpdateImage，状态 #imgState，耗时 #imgMs，发送帧 #imgFrame。 -->
       <section class="card">
         <div class="card-title">
           <span>0x11 · 刷图（显示已送的图）</span>
@@ -179,6 +192,10 @@
 
     <div class="col">
 
+      <!-- ============ 0x20 · 擦除图片槽 ============
+           异步命令：55 AA 00 08 20 [image_id] [CRC] 0D，擦除该槽 172800 字节（按 4096 对齐占 43 扇区）。
+           擦除没有心跳，页面按 60 s 空闲上限等待；完成后设备推 CMD=0x20 的 0x02（FlashTask 按操作区分 CMD）。
+           控件：槽位 #slotSelect + 按钮 #btnErase（window.confirm 二次确认），状态 #eraseState，耗时 #eraseMs，发送帧 #eraseFrame。 -->
       <section class="card">
         <div class="card-title">
           <span>0x20 · 擦除图片槽</span>
@@ -213,7 +230,12 @@
     </div>
   </div>
 
-  <!-- ============ 0x30 测试送图 ============ -->
+  <!-- ============ 0x30 · 测试送图（六色棋盘） ============
+       长流程：先 0x20 擦同槽并等 DONE → 按 233 字节 × 742 片逐片写（每帧 244 字节，offset 递增 233）
+       → 默认再发 0x11 刷屏（#upRefreshAfter 取消勾选可跳过）。
+       控件：#upSlotSelect / #btnUploadTest / #btnUploadCancel / #upRefreshAfter，
+       进度 #upBar / #upText / #upSpeed / #upState / #upMs，预览 #upPreview，首片帧头 #upFrame。
+       送图期间 ble.js 会设 client.silentCmd = 0x30，742 片不逐条写日志，只靠进度条。 -->
   <section class="card" style="margin-top:18px;">
     <div class="card-title">
       <span>0x30 · 测试送图（六色棋盘）</span>
@@ -279,6 +301,10 @@
   </section>
 
   <!-- ============ 收发日志（整行宽度，置底） ============ -->
+  <!-- ============ 收发日志（整行宽度，置底） ============
+       所有 tx / rx 帧都记在这里：ble.js 的 writeFrame() 记「发送」，onNotify() 记「接收」。
+       心跳（0x01）与送图分片（silentCmd）故意不记，避免几百条把日志冲掉。
+       控件：#logBox 容器，#btnClearLog 清空；页面其它卡片的失败提示也写进这里。 -->
   <section class="card" style="margin-top:18px;">
     <div class="card-title">
       <span>收发日志</span>

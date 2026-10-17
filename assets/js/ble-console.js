@@ -211,7 +211,8 @@
     }
   }
 
-  /* ---------------- 0x30 测试送图：六色棋盘图 ---------------- */
+  /* ---------------- 0x30 测试送图：六色棋盘图 ----------------
+     构造 480×720 六色棋盘并打包成 4bpp（172800 字节），供 0x30 卡片直接发送。 */
   /**
    * 生成 480×720 的六色棋盘：60px 方格，(cx + cy*2) % 6 保证上下左右相邻格不同色，
    * 直接走阈值量化（颜色本来就是调色板原色，不会被抖动改掉）再按 4bpp 打包。
@@ -346,7 +347,8 @@
     setConnected(false);
   });
 
-  /* ---------------- 0x00 读版本 ---------------- */
+  /* ---------------- 0x00 读版本 ----------------
+     同步命令；应答没有响应码，结果框只写版本号，原始帧交给 ble.js 的 rx 日志。 */
   el.btnRev.addEventListener('click', async () => {
     if (busy) return log('sys', '上一条命令还在执行，稍等');
     busy = true;
@@ -375,7 +377,8 @@
     }
   });
 
-  /* ---------------- 0x10 刷纯色 ---------------- */
+  /* ---------------- 0x10 刷纯色 ----------------
+     点颜色块即发；异步，靠 0x01 心跳续命，成功 / 失败 / 超时都在 finally 里解锁控件。 */
   el.colorGrid.addEventListener('click', async (e) => {
     const btn = e.target.closest('button[data-color-id]');
     if (!btn) return;
@@ -407,7 +410,8 @@
     }
   });
 
-  /* ---------------- 0x11 刷图（显示指定槽） ---------------- */
+  /* ---------------- 0x11 刷图（显示指定槽） ----------------
+     异步；完成通知的 CMD 是 0x10（固件 quirk），acceptCmds 已在 client.updateImage() 里配好。 */
   el.btnUpdateImage.addEventListener('click', async () => {
     if (busy) return log('sys', '上一条命令还在执行，稍等');
     const slot = Number(el.imgSlotSelect.value) || 0;
@@ -436,7 +440,8 @@
     }
   });
 
-  /* ---------------- 0x20 擦除图片槽 ---------------- */
+  /* ---------------- 0x20 擦除图片槽 ----------------
+     异步但无心跳，按 60 s 空闲上限等待；发之前 window.confirm 二次确认，失败不自动重试。 */
   el.btnErase.addEventListener('click', async () => {
     if (busy) return log('sys', '上一条命令还在执行，稍等');
     const slot = Number(el.slotSelect.value) || 0;
@@ -469,7 +474,8 @@
     }
   });
 
-  /* ---------------- 0x30 测试送图 ---------------- */
+  /* ---------------- 0x30 测试送图 ----------------
+     擦除 → 742 片逐片等 DONE →（可选）0x11 刷屏；中止 / 送图失败 / 送图成功但刷图失败分开提示。 */
   el.btnUploadTest.addEventListener('click', async () => {
     if (busy) return log('sys', '上一条命令还在执行，稍等');
     const slot = Number(el.upSlotSelect.value) || 0;
