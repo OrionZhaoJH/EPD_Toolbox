@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BLE 命令测试 · EPD Toolbox</title>
-<meta name="description" content="CH592F 电子纸设备的 BLE 命令测试台：0x00 读 IC 版本、0x10 刷纯色（六色可选）、0x20 擦除图片槽，实时查看 55 AA … 0D 帧收发。">
+<meta name="description" content="CH592F 电子纸设备的 BLE 命令测试台：0x00 读 IC 版本、0x10 刷纯色（六色可选）、0x11 刷图（显示指定图片槽）、0x20 擦除图片槽、0x30 分片送图，实时查看 55 AA … 0D 帧收发。">
 <meta name="theme-color" content="#f5f7fa" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
 <link rel="stylesheet" href="assets/css/app.css">
@@ -33,7 +33,7 @@
     <h1><span class="icon">📶</span> BLE 命令测试</h1>
     <p>
       逐条下发固件已实现的 CHAR3 命令并观察响应。命令帧统一为 <code>55 AA LEN_H LEN_L CMD DATA CRC 0D</code>，
-      响应经 FFE4 通知回传；异步命令（刷纯色 / 擦除）会先回 <code>0x01 受理</code>，完成后推送 <code>0x02 完成</code>。
+      响应经 FFE4 通知回传；异步命令（刷纯色 / 刷图 / 擦除）会先回 <code>0x01 受理</code>，完成后推送 <code>0x02 完成</code>。
     </p>
   </header>
 
@@ -82,7 +82,7 @@
   </section>
 
   <div class="grid-2">
-    <!-- ============ 左列：0x00 / 0x10 ============ -->
+    <!-- ============ 左列：0x00 读版本 / 0x10 刷纯色 ============ -->
     <div class="col">
 
       <section class="card">
@@ -129,7 +129,7 @@
       </section>
     </div>
 
-    <!-- ============ 右列：0x20 / 日志 ============ -->
+    <!-- ============ 右列：0x20 擦除 / 0x11 刷图 / 收发日志 ============ -->
     <div class="col">
 
       <section class="card">
@@ -166,6 +166,45 @@
 
       <section class="card">
         <div class="card-title">
+          <span>0x11 · 刷图（显示已送的图）</span>
+          <span class="sub">CHAR3_CMD_11_UPDATE_IMAGE</span>
+        </div>
+        <p class="hint">
+          把指定槽（0~10）里<b>已经写好</b>的 480×720 4bpp 图刷到屏上：
+          <code class="mono">55 AA 00 08 11 [image_id] 00 0D</code>。与刷纯色一样是异步命令，
+          先回 <code>0x01 受理</code>，刷屏期间持续推 <code>0x01</code> 心跳，刷完推 <code>0x02</code>。
+          <b>槽里没有数据（刚擦除过）只会刷出空白</b>，正确顺序是
+          <code>0x20</code> 擦除 → <code>0x30</code> 送图 → <code>0x11</code> 刷图。
+        </p>
+
+        <div class="row" style="align-items:flex-end; margin-top:12px;">
+          <div class="form-group" style="flex:0 1 150px;">
+            <label for="imgSlotSelect">图片槽</label>
+            <select id="imgSlotSelect"></select>
+          </div>
+          <div class="form-group" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" id="btnUpdateImage" type="button" disabled>刷该槽</button>
+          </div>
+          <span class="spacer"></span>
+          <div class="form-group" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <div class="control-line">
+              <span class="badge off" id="imgState">未执行</span>
+              <span class="kv">耗时 <b id="imgMs">—</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="frame-line">发送帧 <code class="mono" id="imgFrame">—</code></div>
+        <p class="hint" style="margin-top:8px;">
+          注：固件 <code class="mono">peripheralEPDTaskCB()</code> 推进度/完成通知时 CMD 字段固定写 <code class="mono">0x10</code>，
+          所以刷图的完成帧在日志里是 <code class="mono">55 AA 00 08 10 02 00 0D</code>，页面已按此兼容。
+        </p>
+      </section>
+
+      <section class="card">
+        <div class="card-title">
           <span>收发日志</span>
           <button class="btn btn-sm" id="btnClearLog" type="button">清空</button>
         </div>
@@ -183,8 +222,8 @@
     <p class="hint">
       送图前先对同一槽发 <code>0x20</code> 擦除并等待 DONE，成功后再按 <code>233</code> 字节分片写入
       <b>480×720 4bpp</b> 的六色棋盘图：共 <b>742</b> 片，每片固定 244 字节帧、offset 递增 233，
-      <b>每片等到 DONE 才发下一片</b>（天然流控）。固件暂无刷图命令（<code>0x11</code>），
-      写完后数据已落盘，但不会自动显示到屏上。
+      <b>每片等到 DONE 才发下一片</b>（天然流控）。写完默认接着发 <code>0x11</code>
+      把这一槽刷到屏上（可用右侧复选框关掉）；不刷图的话数据只是落盘，屏上不会有变化。
     </p>
 
     <div class="row" style="align-items:flex-end; margin-top:12px;">
@@ -199,6 +238,13 @@
       <div class="form-group" style="flex:0 0 auto;">
         <label>&nbsp;</label>
         <button class="btn" id="btnUploadCancel" type="button" disabled>中止</button>
+      </div>
+      <div class="form-group" style="flex:0 0 auto;">
+        <label>&nbsp;</label>
+        <label class="check-row" style="min-height:38px;">
+          <input type="checkbox" id="upRefreshAfter" checked>
+          送完自动刷图（0x11）
+        </label>
       </div>
       <span class="spacer"></span>
       <div class="form-group" style="flex:0 0 auto;">

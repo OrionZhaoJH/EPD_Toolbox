@@ -4,6 +4,7 @@
    逐条下发固件已实现的 CHAR3 命令：
      0x00 CHAR3_CMD_00_REVISION      读 IC 版本
      0x10 CHAR3_CMD_10_UPDATE_COLOR  刷纯色（六色可选）
+     0x11 CHAR3_CMD_11_UPDATE_IMAGE  刷图（把指定槽的图显示到屏上）
      0x20 CHAR3_CMD_20_FLASH_ERASE   擦除图片槽
    依赖：e6-codec.js（六色调色板）、ble.js（连接与组帧）
    ========================================================================== */
@@ -49,7 +50,14 @@
     eraseState: $('eraseState'),
     eraseMs: $('eraseMs'),
 
+    imgSlotSelect: $('imgSlotSelect'),
+    btnUpdateImage: $('btnUpdateImage'),
+    imgState: $('imgState'),
+    imgMs: $('imgMs'),
+    imgFrame: $('imgFrame'),
+
     upSlotSelect: $('upSlotSelect'),
+    upRefreshAfter: $('upRefreshAfter'),
     btnUploadTest: $('btnUploadTest'),
     btnUploadCancel: $('btnUploadCancel'),
     upState: $('upState'),
@@ -146,6 +154,7 @@
   function initSlots() {
     fillSlotSelect(el.slotSelect); // 擦除卡片
     fillSlotSelect(el.upSlotSelect); // 送图卡片（独立选择，互不影响）
+    fillSlotSelect(el.imgSlotSelect); // 刷图卡片（独立选择，互不影响）
   }
 
   function initColors() {
@@ -191,9 +200,11 @@
   function updateFrames() {
     const slot = Number(el.slotSelect.value) || 0;
     const upSlot = Number(el.upSlotSelect.value) || 0;
+    const imgSlot = Number(el.imgSlotSelect.value) || 0;
     el.revFrame.textContent = BLE.hex(BLE.buildFrame(CMD.REVISION, [0x00]));
     el.colorFrame.textContent = BLE.hex(BLE.buildFrame(CMD.UPDATE_COLOR, [selectedColor]));
     el.eraseFrame.textContent = BLE.hex(BLE.buildFrame(CMD.FLASH_ERASE, [slot]));
+    el.imgFrame.textContent = BLE.hex(BLE.buildFrame(CMD.UPDATE_IMAGE, [imgSlot]));
     if (testImage) {
       const head = BLE.buildImageChunkFrame(upSlot, 0, testImage.bytes.subarray(0, BLE.CHUNK_PAYLOAD));
       el.upFrame.textContent = BLE.hex(head.subarray(0, 16)) + ' … (' + head.length + ' 字节)';
@@ -257,9 +268,12 @@
     const usable = !!client.connected && !locked;
     el.btnRev.disabled = !usable;
     el.btnErase.disabled = !usable;
+    el.btnUpdateImage.disabled = !usable;
     el.btnUploadTest.disabled = !usable;
     el.slotSelect.disabled = !usable;
     el.upSlotSelect.disabled = !usable;
+    el.imgSlotSelect.disabled = !usable;
+    el.upRefreshAfter.disabled = !usable;
     Array.from(el.colorGrid.children).forEach((btn) => (btn.disabled = !usable));
     if (!usable) el.btnUploadCancel.disabled = true;
   }
@@ -297,6 +311,8 @@
       if (count !== 1) return;
       if (cmd === CMD.UPDATE_COLOR) {
         log('sys', '刷屏仍在进行，收到设备心跳（保持等待）');
+      } else if (cmd === CMD.UPDATE_IMAGE) {
+        log('sys', '刷图仍在进行，收到设备心跳（保持等待）');
       } else if (cmd === CMD.FLASH_ERASE) {
         log('sys', '擦除仍在进行，收到设备心跳（保持等待）');
       }
@@ -307,6 +323,7 @@
   el.nameFilter.addEventListener('input', updateFrames);
   el.slotSelect.addEventListener('change', updateFrames);
   el.upSlotSelect.addEventListener('change', updateFrames);
+  el.imgSlotSelect.addEventListener('change', updateFrames);
 
   el.btnConnect.addEventListener('click', async () => {
     try {
@@ -389,6 +406,35 @@
     }
   });
 
+  /* ---------------- 0x11 刷图（显示指定槽） ---------------- */
+  el.btnUpdateImage.addEventListener('click', async () => {
+    if (busy) return log('sys', '上一条命令还在执行，稍等');
+    const slot = Number(el.imgSlotSelect.value) || 0;
+    busy = true;
+    setCommandLock(true);
+    startProgress(el.imgState, '刷图中');
+    const t0 = performance.now();
+    try {
+      await client.updateImage(slot, {
+        onRetry: (info) => log('sys', '刷图第 ' + info.attempt + ' 次失败（' + info.error.message + '），重发'),
+      });
+      const ms = Math.round(performance.now() - t0);
+      stopProgress();
+      el.imgMs.textContent = ms + ' ms';
+      setCmdState(el.imgState, 'ok', '完成 · 槽 ' + slot);
+      log('ok', '刷图完成：槽 ' + slot + ' 已显示到屏上（' + (ms / 1000).toFixed(1) + ' s，心跳 ' + hbCount + ' 次）');
+    } catch (err) {
+      const ms = Math.round(performance.now() - t0);
+      stopProgress();
+      el.imgMs.textContent = ms + ' ms';
+      setCmdState(el.imgState, 'err', '失败');
+      log('err', '刷图失败：槽 ' + slot + '（' + err.message + '）——槽里没有有效图片时先擦除并送图');
+    } finally {
+      busy = false;
+      setCommandLock(false);
+    }
+  });
+
   /* ---------------- 0x20 擦除图片槽 ---------------- */
   el.btnErase.addEventListener('click', async () => {
     if (busy) return log('sys', '上一条命令还在执行，稍等');
@@ -437,6 +483,8 @@
     setProgress(0, '准备中…');
     const t0 = performance.now();
     let retries = 0;
+    let uploaded = false; // 数据是否已完整落盘（区分「送图失败」和「送图成功但刷图失败」）
+    const show = el.upRefreshAfter.checked;
 
     try {
       // 1) 先擦除目标槽并等 DONE —— 协议要求写图前槽是干净的
@@ -479,18 +527,38 @@
         },
       });
 
+      uploaded = true;
       const sec = (performance.now() - t0) / 1000;
       el.upMs.textContent = sec.toFixed(1) + ' s';
-      setProgress(1, '完成：' + res.chunks + ' 片 / ' + res.bytes.toLocaleString() + ' 字节' + (retries ? ' · 重试 ' + retries + ' 次' : ''));
-      setCmdState(el.upState, 'ok', '完成 · 槽 ' + slot);
-      log('ok', '送图完成：槽 ' + slot + '，' + res.chunks + ' 片，' + sec.toFixed(1) + ' s' + (retries ? '，重试 ' + retries + ' 次' : '') + '（固件暂无刷图命令，数据已落盘）');
+      log('ok', '送图完成：槽 ' + slot + '，' + res.chunks + ' 片，' + sec.toFixed(1) + ' s' + (retries ? '，重试 ' + retries + ' 次' : '') + '（数据已落盘）');
+
+      // 3) 可选：送完立刻发 0x11 把这一槽刷到屏上，省一次手动点击
+      if (show) {
+        setCmdState(el.upState, 'running', '刷图中…');
+        setProgress(1, '送图完成 · 正在刷图（0x11 · 槽 ' + slot + '）…');
+        log('sys', '开始刷图：0x11 槽 ' + slot + '（该命令的完成通知 CMD 是 0x10，属固件约定）');
+        await client.updateImage(slot, {
+          onRetry: (info) => log('sys', '刷图第 ' + info.attempt + ' 次失败（' + info.error.message + '），重发'),
+        });
+      }
+
+      const total = (performance.now() - t0) / 1000;
+      el.upMs.textContent = total.toFixed(1) + ' s';
+      setProgress(
+        1,
+        '完成：' + res.chunks + ' 片 / ' + res.bytes.toLocaleString() + ' 字节' +
+          (retries ? ' · 重试 ' + retries + ' 次' : '') + (show ? ' · 已刷图' : '')
+      );
+      setCmdState(el.upState, 'ok', '完成 · 槽 ' + slot + (show ? ' 已显示' : ''));
+      if (show) log('ok', '刷图完成：槽 ' + slot + ' 已显示到屏上（送图 + 刷屏总耗时 ' + total.toFixed(1) + ' s）');
     } catch (err) {
       const sec = (performance.now() - t0) / 1000;
       el.upMs.textContent = sec.toFixed(1) + ' s';
       const aborted = uploadAbort;
-      setCmdState(el.upState, 'err', aborted ? '已中止' : '失败');
-      el.upText.textContent = (aborted ? '已中止' : '失败') + '：' + err.message;
-      log('err', '送图' + (aborted ? '中止' : '失败') + '：' + err.message);
+      const what = aborted ? '中止' : uploaded ? '送图成功但刷图失败' : '失败';
+      setCmdState(el.upState, 'err', aborted ? '已中止' : uploaded ? '送图完成 · 刷图失败' : '失败');
+      el.upText.textContent = what + '：' + err.message;
+      log('err', what + '：' + err.message + (uploaded ? '（图片数据已落盘，可稍后单独点 0x11 刷该槽）' : ''));
     } finally {
       busy = false;
       setCommandLock(false);
@@ -528,6 +596,6 @@
     el.btnConnect.disabled = true;
     log('sys', '当前浏览器不支持 Web Bluetooth，仅能查看发送帧');
   } else {
-    log('sys', '命令测试页就绪：0x00 读版本 / 0x10 刷纯色 / 0x20 擦除图片槽 / 0x30 测试送图');
+    log('sys', '命令测试页就绪：0x00 读版本 / 0x10 刷纯色 / 0x11 刷图 / 0x20 擦除图片槽 / 0x30 测试送图');
   }
 })();
