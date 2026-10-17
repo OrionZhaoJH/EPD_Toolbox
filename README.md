@@ -1,6 +1,6 @@
 # EPD Toolbox
 
-面向 **E6 六色电子纸**（黑 / 白 / 黄 / 红 / 蓝 / 绿）的静态网页上位机：图片抖动量化、4bpp 面板数据打包导出、Web Bluetooth 设备控制。
+面向 **E6 六色电子纸**（黑 / 白 / 黄 / 红 / 蓝 / 绿）的静态网页工具箱：图片抖动量化、4bpp 面板数据打包导出、独立的 BLE 设备命令测试页。
 
 纯静态站点，无后端、无构建步骤，推送到 `main` 自动部署到 GitHub Pages。
 
@@ -9,16 +9,29 @@
 | 页面 | 说明 |
 | --- | --- |
 | `index.html` | 工具箱首页：工具入口、像素编码与 BLE 帧格式速查 |
-| `e6-image.html` | 图像输入 → 抖动量化 → 预览 → 导出 / 设备控制 |
+| `e6-image.html` | 图像输入 → 抖动量化 → 预览 → 导出 bin / C 数组 |
+| `ble-console.html` | BLE 命令测试：读版本、刷纯色（六色）、擦除图片槽 |
 
-已实现：
+图像页已实现：
 
 - 12 种抖动算法（Floyd-Steinberg、Atkinson、Jarvis、Stucki、Burkes、Sierra、Sierra Lite、Ordered 2/4/8、阈值、随机）
 - 亮度 / 对比度 / 抖动强度 / 蛇形扫描参数
 - 尺寸适配：等比留白、等比裁剪、拉伸；分辨率可自定义（默认 480×720）
 - 实时 6 色预览（适应 / 1× / 2× / 4× 缩放）与颜色占比统计
 - 导出 `.bin`、C 数组 `.h`、复制全部 hex
-- BLE：读 IC 版本、刷纯色、擦除图片槽，命令帧 `55 AA … 0D` 实时收发日志
+
+命令测试页已实现（对应固件 `CHAR3_CMD_t`）：
+
+| 命令 | 名称 | 可调参数 |
+| --- | --- | --- |
+| `0x00` | `CHAR3_CMD_00_REVISION` | 无，响应回 3 字节 IC 版本 |
+| `0x10` | `CHAR3_CMD_10_UPDATE_COLOR` | 六色可选（黑 / 白 / 黄 / 红 / 蓝 / 绿） |
+| `0x20` | `CHAR3_CMD_20_FLASH_ERASE` | 槽号 0~10，执行前二次确认 |
+
+每张卡片都会实时显示「发送帧」字节，执行后显示状态与耗时；异步命令（`0x10` / `0x20`）会先回 `0x01 受理`，完成后再推 `0x02 完成`。
+
+通用：
+
 - 连接状态三态显示（未连接 / 连接中… / 已连接），滚动后顶栏常驻状态徽章
 - 移动端适配：单列布局、表单项独占一行、顶栏按钮收成图标、表格横向滚动
 
@@ -27,13 +40,15 @@
 ```
 EPD_Toolbox/
 ├── index.html                     # 首页（工具入口 + 格式速查）
-├── e6-image.html                  # E6 图像转换 / 设备控制页
+├── e6-image.html                  # E6 图像转换页
+├── ble-console.html               # BLE 命令测试页
 ├── assets/
 │   ├── css/app.css                # 设计系统（跟随系统暗色）
 │   └── js/
 │       ├── e6-codec.js            # 调色板 / 抖动 / 4bpp 打包（纯函数）
 │       ├── ble.js                 # Web Bluetooth 封装 + 命令帧
-│       └── e6-page.js             # 页面交互
+│       ├── e6-page.js             # 图像页交互
+│       └── ble-console.js         # 命令测试页交互
 ├── tests/codec.test.mjs           # 编解码自测（node 直接跑）
 └── .github/workflows/deploy-pages.yml
 ```
