@@ -156,6 +156,22 @@ code, kbd, pre { font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monos
 .topbar-device { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 640px) { .topbar-device { display: none; } }
 
+/* 顶栏里的名称前缀过滤框（e6-image.html）：与连接按钮同一行；窄屏收起，退回列出全部设备 */
+.topbar-filter {
+  width: 112px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+.topbar-filter:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.topbar-filter:disabled { opacity: .55; }
+@media (max-width: 640px) { .topbar-filter { display: none; } }
+
 @media (max-width: 640px) {
   body { padding: 12px 14px 32px; }
 }

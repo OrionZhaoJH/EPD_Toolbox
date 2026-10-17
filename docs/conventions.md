@@ -180,6 +180,10 @@ node tests/ble.test.mjs
   送图要几十秒，用户常常滚到下面看进度，连接入口跟着页面滚走就得来回找；
   顶栏里依次是 `#bleState`（`#bleStateText`）、`#bleDeviceName`、`#btnConnect`、`#btnDisconnect`，
   设备名用 `.topbar-device` 限宽省略、≤640px 隐藏，避免把按钮挤到第二行；
+- **设备名过滤输入框 `#nameFilter` 也放顶栏**（`#btnConnect` 左边、与连接按钮同一行）：
+  默认 `EPD`，留空则列出全部设备，连接时把值作为 `namePrefix` 传给 `client.connect()`；
+  它只是过滤，不算命令控件，所以不进 `applyCommandEnabled()` 的互斥集合，
+  窄屏（≤640px）用 `.topbar-filter` 收起，退回「列出全部设备」；
 - 互斥、状态徽章、进度与中止沿用 §1 / §6 的同一套写法（`applyCommandEnabled()` /
   `setCommandLock()` / `setSendState()`），命令执行中除连接外的控件全部禁用。
 

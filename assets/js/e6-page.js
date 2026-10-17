@@ -36,6 +36,7 @@
     algo: $('algo'),
     serpentine: $('serpentine'),
     flipV: $('flipV'),
+    nameFilter: $('nameFilter'),
     brightness: $('brightness'),
     contrast: $('contrast'),
     strength: $('strength'),
@@ -515,8 +516,10 @@
   /* ---------------- 连接设备 ---------------- */
   el.btnConnect.addEventListener('click', async () => {
     if (!client) return;
+    // 与 BLE 命令测试页一致：按设备名前缀过滤，留空则列出全部设备
+    const namePrefix = (el.nameFilter.value || '').trim();
     try {
-      await client.connect({}); // 默认 FFE0 服务 / FFE3 写 / FFE4 通知，列出全部设备
+      await client.connect({ namePrefix }); // 默认 FFE0 服务 / FFE3 写 / FFE4 通知
     } catch (err) {
       if (err && err.name === 'NotFoundError') log('sys', '已取消设备选择');
       else log('err', '连接失败：' + (err && err.message ? err.message : err));

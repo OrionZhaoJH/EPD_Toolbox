@@ -21,6 +21,9 @@
     <div class="topbar-right">
       <span class="badge off" id="bleState"><span id="bleStateText">未连接</span></span>
       <span class="kv topbar-device" id="bleDeviceName"></span>
+      <input type="text" id="nameFilter" class="topbar-filter" placeholder="设备名前缀"
+             value="EPD" autocomplete="off" spellcheck="false"
+             title="连接时按设备名前缀过滤（留空则列出全部设备），与 BLE 命令测试页一致">
       <button class="btn btn-primary btn-sm" id="btnConnect" type="button" title="连接 BLE 设备">
         <span class="btn-ico">🔗</span><span class="btn-label">连接 BLE</span>
       </button>
