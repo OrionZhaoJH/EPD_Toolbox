@@ -164,6 +164,86 @@ console.log('BLE 组帧与解析自测');
   await sleep(10);
 }
 
+/* 10. 0x30 写图片分片帧格式（BLE_Protocol.md §5） */
+{
+  const full = new Uint8Array(233).fill(0xaa);
+  const f0 = B.buildImageChunkFrame(0, 0, full);
+  ok(f0.length === 244, '满片帧长 = 244 字节');
+  ok(B.hex(f0.subarray(0, 9)) === '55 AA 00 F4 30 00 00 00 00', '帧头/长度/cmd/image_id/offset = 55 AA 00 F4 30 00 00 00 00');
+  ok(f0[9] === 0xaa && f0[241] === 0xaa, 'payload 位于偏移 9~241');
+  ok(f0[242] === 0x00 && f0[243] === 0x0d, 'crc=0、帧尾 0x0D');
+
+  const f1 = B.buildImageChunkFrame(0, 233, full);
+  ok(B.hex(f1.subarray(6, 9)) === '00 00 E9', '第二片 offset=233=0x0000E9（大端 3 字节）');
+
+  const lastPayload = new Uint8Array(147).fill(0x55);
+  const fl = B.buildImageChunkFrame(3, 172653, lastPayload);
+  ok(fl.length === 158, '最后一片（147 字节 payload）帧长 = 11 + 147 = 158');
+  ok(B.hex(fl.subarray(2, 4)) === '00 9E', '最后一片长度字段 = 0x009E（158）');
+  ok(fl[5] === 3, 'image_id 正确写入');
+}
+
+/* 11. writeImage：742 片、offset 递增 233、每片等 DONE */
+{
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {}, onHeartbeat() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  const frames = [];
+  client.writeChar = {
+    writeValue: async (frame) => {
+      frames.push(Uint8Array.from(frame));
+      handlers.onFrame({ cmd: 0x30, code: 0x02, data: new Uint8Array([2]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x30, 2, 0, 0x0d]) });
+    },
+  };
+  const data = new Uint8Array(B.IMAGE_BYTES);
+  for (let i = 0; i < data.length; i++) data[i] = i & 0xff;
+
+  let progress = 0;
+  const res = await client.writeImage(0, data, { onProgress: () => progress++ });
+  ok(B.IMAGE_BYTES === 172800 && B.IMAGE_CHUNKS === 742, '常量：172800 字节 / 742 片');
+  ok(frames.length === 742 && res.chunks === 742, '实际发出 742 片');
+  ok(progress === 742, 'onProgress 回调 742 次');
+
+  const off = (f) => (f[6] << 16) | (f[7] << 8) | f[8];
+  let offsetsOk = true;
+  for (let i = 0; i < frames.length; i++) {
+    if (off(frames[i]) !== i * 233) { offsetsOk = false; break; }
+  }
+  ok(offsetsOk, 'offset 依次为 0, 233, 466 …');
+
+  const last = frames[frames.length - 1];
+  ok(last.length === 158, '最后一片帧长 158（payload 147）');
+  ok(off(last) === 172653 && off(last) + 147 === 172800, '最后一片 offset 172653 + 147 = 172800');
+
+  // payload 与源数据对应
+  ok(frames[1][9] === data[233] && frames[1][10] === data[234], '第二片 payload 接续源数据');
+  ok(last[9] === data[172653] && last[155] === data[172799], '最后一片首尾字节与源数据一致');
+}
+
+/* 12. writeImage：中止与长度校验 */
+{
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  let sent = 0;
+  client.writeChar = {
+    writeValue: async () => {
+      sent++;
+      handlers.onFrame({ cmd: 0x30, code: 0x02, data: new Uint8Array([2]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x30, 2, 0, 0x0d]) });
+    },
+  };
+  const data = new Uint8Array(B.IMAGE_BYTES);
+
+  const aborted = await client
+    .writeImage(1, data, { shouldStop: () => sent >= 3 })
+    .then(() => ({ ok: true }), (e) => ({ ok: false, msg: e.message }));
+  ok(!aborted.ok && /中止/.test(aborted.msg), 'shouldStop 后中止并报错');
+  ok(sent === 3, '中止前只发了 3 片（实际 ' + sent + '）');
+
+  const bad = await client.writeImage(1, new Uint8Array(1000)).then(() => ({ ok: true }), (e) => ({ ok: false, msg: e.message }));
+  ok(!bad.ok && /172800/.test(bad.msg), '长度不对时直接拒绝，不发出任何帧');
+}
+
 if (fail.length) {
   console.error('\n失败 ' + fail.length + ' 项');
   process.exit(1);

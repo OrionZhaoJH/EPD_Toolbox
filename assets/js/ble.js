@@ -10,14 +10,17 @@
 
    服务 / 特征（Profile/gattprofile.h）：
      FFE0 服务，FFE3 下行命令（写），FFE4 上行响应（notify）
-     FFE3/FFE4 单包长度 20 字节，所以命令帧都很短
+     短命令帧都是 8~9 字节；送图分片最大 244 字节，需要 ATT MTU ≥ 247
+     （Web Bluetooth 没有主动请求 MTU 的 API，由系统自动协商）
 
    命令码（CHAR3_CMD_t）：
      0x00 读 IC 版本     55 AA 00 08 00 00 00 0D
                          → 应答 55 AA 00 0A 00 R1 R2 R3 00 0D（无响应码，PAYLOAD 即版本号）
      0x10 刷纯色         data[0] = 颜色编号 0~7
      0x20 擦除图片槽     data[0] = image_id 0~10
-   响应码（RESPONSE_CODE_t，仅 0x10 / 0x20 这类带状态应答的命令使用）：
+     0x30 写图片分片     55 AA 00 F4 30 [id] [off H/M/L] [payload 233B] 00 0D
+                         见 E6_P370_CH592F/BLE_Protocol.md，742 片存一张 480×720 4bpp 图
+   响应码（RESPONSE_CODE_t，仅 0x10 / 0x20 / 0x30 这类带状态应答的命令使用）：
      0x00 成功 / 0x01 受理中(DOING) / 0x02 完成(DONE) / 0x03 忙 / 0xE0+ 各类错误
    注意：解析帧时不能一律把 PAYLOAD 首字节当响应码，读版本的应答首字节是版本号。
    ========================================================================== */
@@ -32,7 +35,16 @@
     REVISION: 0x00,
     UPDATE_COLOR: 0x10,
     FLASH_ERASE: 0x20,
+    WRITE_IMAGE: 0x30,
   };
+
+  /* ---- 图片传输常量（见 E6_P370_CH592F/BLE_Protocol.md） ---- */
+  const IMAGE_WIDTH = 480;
+  const IMAGE_HEIGHT = 720;
+  const IMAGE_BYTES = (IMAGE_WIDTH * IMAGE_HEIGHT) / 2; // 172800，4bpp
+  const CHUNK_PAYLOAD = 233; // 单帧 244 字节：11 字节开销 + 233 字节数据
+  const CHUNK_FRAME_BYTES = 244;
+  const IMAGE_CHUNKS = Math.ceil(IMAGE_BYTES / CHUNK_PAYLOAD); // 742
 
   const RESPONSE_TEXT = {
     0x00: '成功',
@@ -96,6 +108,33 @@
   }
 
   /**
+   * 组 0x30 写图片分片帧。
+   *   55 AA 00 F4 30 [image_id] [offH][offM][offL] [payload ≤233B] 00 0D
+   * 满片固定 244 字节；最后一片不满 233 字节时帧长缩短为 11 + payload 长度。
+   *
+   * @param {number} imageId 图片序号 0~10
+   * @param {number} offset  本片数据在整图中的字节偏移（大端写入）
+   * @param {Uint8Array} payload 本片数据，长度 ≤ 233
+   */
+  function buildImageChunkFrame(imageId, offset, payload) {
+    const len = 11 + payload.length;
+    const frame = new Uint8Array(len);
+    frame[0] = HEAD1;
+    frame[1] = HEAD2;
+    frame[2] = (len >> 8) & 0xff;
+    frame[3] = len & 0xff;
+    frame[4] = CMD.WRITE_IMAGE;
+    frame[5] = imageId & 0xff;
+    frame[6] = (offset >> 16) & 0xff;
+    frame[7] = (offset >> 8) & 0xff;
+    frame[8] = offset & 0xff;
+    frame.set(payload, 9);
+    frame[len - 2] = 0x00; // crc 占位
+    frame[len - 1] = TAIL;
+    return frame;
+  }
+
+  /**
    * 从接收缓冲区里切出完整帧（原地消费 rx）。
    * 帧格式：55 AA LEN_H LEN_L CMD PAYLOAD... CRC 0D，PAYLOAD 长度 = LEN - 7。
    * 注意：不同命令的 PAYLOAD 语义不一样——
@@ -153,6 +192,7 @@
       settings: Object.assign({}, DEFAULTS),
       rx: [],
       lastFrame: null,
+      silentCmd: 0, // 该 cmd 的收发不写日志（送图分片用）
     };
 
     function reset() {
@@ -230,7 +270,8 @@
         client.lastFrame = frame;
         // 心跳（0x01）几十上百条，不逐条记日志，避免把日志冲掉；
         // 页面通过 onHeartbeat 只在第一次心跳时补一条说明
-        if (frame.code !== 0x01) log('rx', '接收 ' + hex(frame.raw));
+        // 送图分片（silentCmd）同理：742 片只靠进度条反馈
+        if (frame.code !== 0x01 && frame.cmd !== client.silentCmd) log('rx', '接收 ' + hex(frame.raw));
         if (h.onFrame) h.onFrame(frame);
       }, log);
     }
@@ -240,6 +281,7 @@
         case CMD.REVISION: return '读版本';
         case CMD.UPDATE_COLOR: return '刷纯色';
         case CMD.FLASH_ERASE: return '擦除图片槽';
+        case CMD.WRITE_IMAGE: return '写图片分片';
         default: return '0x' + cmd.toString(16).toUpperCase();
       }
     };
@@ -248,17 +290,29 @@
       return RESPONSE_TEXT[code] || '未知响应 0x' + code.toString(16).toUpperCase();
     };
 
-    /** 底层写一帧 */
-    client.writeFrame = async function (frame) {
+    /**
+     * 底层写一帧。
+     * @param {Uint8Array} frame
+     * @param {{quiet?: boolean}} [opts] quiet = 不写 tx 日志（送图分片会写 742 次）
+     */
+    client.writeFrame = async function (frame, opts) {
       if (!client.connected) throw new Error('未连接设备');
-      log('tx', '发送 ' + hex(frame));
+      if (!(opts && opts.quiet)) {
+        log('tx', '发送 ' + (frame.length > 32 ? hex(frame.subarray(0, 12)) + ' … (' + frame.length + ' 字节)' : hex(frame)));
+      }
+      // 协议要求图片分片用 Write Request（有确认），
+      // 0x30 的 244 字节包必须走带响应的写；老浏览器只有 writeValue 可用
+      if (frame.length > 32 && typeof client.writeChar.writeValueWithResponse === 'function') {
+        await client.writeChar.writeValueWithResponse(frame);
+        return;
+      }
       await client.writeChar.writeValue(frame);
     };
 
     /** 发送命令帧 */
-    client.send = async function (cmd, data) {
+    client.send = async function (cmd, data, opts) {
       const frame = buildFrame(cmd, data);
-      await client.writeFrame(frame);
+      await client.writeFrame(frame, opts);
       return frame;
     };
 
@@ -271,7 +325,13 @@
      * 每收到一帧同 cmd 的响应就重置计时器，只要心跳不断就一直等下去，
      * 而不是拿一个固定总超时去卡一次几十秒的刷新。
      */
-    client.sendAndWait = function (cmd, data, idleMs) {
+    client.sendAndWait = function (cmd, data, idleMs, opts) {
+      const frame = buildFrame(cmd, data);
+      return client.sendFrameAndWait(frame, cmd, idleMs, opts);
+    };
+
+    /** 发送一帧自定义帧并等它的响应（送图分片只有「帧」没有「data」） */
+    client.sendFrameAndWait = function (frame, cmd, idleMs, opts) {
       return new Promise((resolve, reject) => {
         const idle = idleMs || client.settings.idleTimeout;
         let timer = null;
@@ -313,7 +373,7 @@
         };
 
         arm();
-        client.send(cmd, data).catch((err) => finish(reject, err));
+        client.writeFrame(frame, opts).catch((err) => finish(reject, err));
       });
     };
 
@@ -355,17 +415,63 @@
       return client.sendAndWait(CMD.FLASH_ERASE, [imageId], idleMs || 60000);
     };
 
+    /**
+     * 按 BLE_Protocol.md §5 分片写入一张图。
+     * 每片 233 字节（帧 244），offset 从 0 递增，写完一片必须等到该片的 DONE 再发下一片
+     * —— 天然流控，避免固件忙时回 BUSY 丢片。
+     *
+     * 调用前必须先 0x20 擦除同一个槽并确认成功（由页面负责编排）。
+     *
+     * @param {number} imageId 0~10
+     * @param {Uint8Array} bytes 4bpp 图像数据，长度应为 172800
+     * @param {object} [opts]
+     *   onProgress({index,count,offset,sent,total})  每片发出前回调
+     *   shouldStop()  返回 true 则在下一片前中止
+     *   idleMs  单片的空闲超时，默认 5000
+     * @returns {Promise<{chunks:number, bytes:number}>}
+     */
+    client.writeImage = async function (imageId, bytes, opts) {
+      const o = opts || {};
+      if (!(imageId >= 0 && imageId <= 10)) throw new Error('图片槽只能是 0~10');
+      if (!bytes || bytes.length !== IMAGE_BYTES) {
+        throw new Error('图片数据必须是 ' + IMAGE_BYTES + ' 字节（480×720 4bpp），当前 ' + (bytes ? bytes.length : 0));
+      }
+      const count = Math.ceil(bytes.length / CHUNK_PAYLOAD);
+      const silent = client.silentCmd;
+      client.silentCmd = CMD.WRITE_IMAGE; // 742 片不逐条写日志
+      try {
+        for (let i = 0; i < count; i++) {
+          if (o.shouldStop && o.shouldStop()) throw new Error('已中止送图');
+          const offset = i * CHUNK_PAYLOAD;
+          const payload = bytes.subarray(offset, Math.min(offset + CHUNK_PAYLOAD, bytes.length));
+          const frame = buildImageChunkFrame(imageId, offset, payload);
+          if (o.onProgress) o.onProgress({ index: i, count, offset, sent: offset + payload.length, total: bytes.length });
+          await client.sendFrameAndWait(frame, CMD.WRITE_IMAGE, o.idleMs || 5000, { quiet: true });
+        }
+      } finally {
+        client.silentCmd = silent;
+      }
+      return { chunks: count, bytes: bytes.length };
+    };
+
     return client;
   }
 
   global.EPDBLE = {
     create,
     buildFrame,
+    buildImageChunkFrame,
     parseStream,
     toUuid,
     hex,
     CMD,
     RESPONSE_TEXT,
     DEFAULTS,
+    IMAGE_WIDTH,
+    IMAGE_HEIGHT,
+    IMAGE_BYTES,
+    CHUNK_PAYLOAD,
+    CHUNK_FRAME_BYTES,
+    IMAGE_CHUNKS,
   };
 })(window);
