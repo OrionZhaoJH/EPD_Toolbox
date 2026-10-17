@@ -56,6 +56,10 @@ try { await client.xxx(); } catch (e) { ... } finally { busy = false; setCommand
 - **分片固定 233 字节**：帧长 244（`55 AA 00 F4 30 [id] [offH offM offL] [payload] 00 0D`），
   offset 大端、从 0 每片 +233；最后一片 payload 147 字节、帧长 158。172800 字节 → 742 片。
 - **每片等 DONE 再发下一片**：这是天然流控，连发会撞上固件忙状态被 `BUSY` 丢弃。
+- **单片失败要重发**：GATT 偶发错误（典型「GATT operation already in progress」）、
+  该片超时、设备回 `BUSY` 都属于可重试；每片最多 3 次（`attempts`，退避 40/80 ms），
+  重试要记一条日志并在进度上标出来。协议错误（`无效数据` / `无效主命令`）不重试，
+  重发也不会变好。
 - **写请求要带响应**：244 字节的包用 Write Request（`writeValueWithResponse`），
   需要 ATT MTU ≥ 247；Web Bluetooth 没有主动请求 MTU 的接口，只能依赖系统自动协商，
   写入报长度错误时要明确提示 MTU 不足。
