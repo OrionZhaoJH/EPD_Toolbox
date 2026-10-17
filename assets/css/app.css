@@ -243,6 +243,8 @@ header.page-head p { color: var(--text-muted); margin-top: 6px; font-size: .92re
    -------------------------------------------------------------------------- */
 .form-row { display: flex; gap: 12px; flex-wrap: wrap; }
 .form-group { display: flex; flex-direction: column; gap: 6px; flex: 1 1 140px; min-width: 0; }
+/* 与 form-group 里的 input 同高：让徽章/提示文字和输入框基线对齐，而不是贴到 label 上 */
+.control-line { display: flex; align-items: center; gap: 8px; min-height: 38px; flex-wrap: wrap; }
 label { font-size: .8rem; font-weight: 500; color: var(--text-muted); }
 input[type="text"], input[type="number"], select {
   width: 100%;

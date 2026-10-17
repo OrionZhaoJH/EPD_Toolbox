@@ -37,15 +37,25 @@
   </div>
 
   <!-- 连接设置行 -->
-  <div class="row" style="margin-bottom:16px;">
+  <div class="row" style="margin-bottom:16px; align-items:flex-end;">
     <div class="form-group" style="flex:0 1 220px;">
       <label for="nameFilter">设备名称前缀</label>
-      <input type="text" id="nameFilter" placeholder="留空则列出全部设备" value="" autocomplete="off">
+      <input type="text" id="nameFilter" placeholder="留空则列出全部设备" value="EPD" autocomplete="off">
     </div>
-    <span class="badge off" id="bleStatus"><span id="bleStatusText">未连接</span></span>
-    <span class="kv" id="bleDeviceName"></span>
+    <div class="form-group" style="flex:0 0 auto;">
+      <label>连接状态</label>
+      <div class="control-line">
+        <span class="badge off" id="bleStatus"><span id="bleStatusText">未连接</span></span>
+        <span class="kv" id="bleDeviceName"></span>
+      </div>
+    </div>
     <span class="spacer"></span>
-    <span class="hint">帧格式 <code>55 AA … 0D</code>，服务 <code>FFE0</code></span>
+    <div class="form-group" style="flex:0 0 auto;">
+      <label>&nbsp;</label>
+      <div class="control-line">
+        <span class="hint">帧格式 <code>55 AA … 0D</code>，服务 <code>FFE0</code></span>
+      </div>
+    </div>
   </div>
 
   <div class="grid-2">
