@@ -81,7 +81,7 @@
     </details>
   </section>
 
-  <div class="grid-2">
+  <div class="grid-2 align-stretch">
     <!-- ============ 第一行：0x00 读版本 / 0x10 刷纯色 ============ -->
     <div class="col">
 
@@ -92,7 +92,7 @@
         </div>
         <p class="hint">
           读回面板驱动 IC 的版本号。应答没有响应码，PAYLOAD 直接就是 3 字节版本号
-          （如 <code class="mono">10 84 02</code>）。
+          （如 <code class="mono">10 84 02</code>）；完整响应帧记在页面底部的收发日志里。
         </p>
 
         <div class="row" style="margin-top:12px;">
@@ -103,7 +103,7 @@
         </div>
 
         <div class="frame-line">发送帧 <code class="mono" id="revFrame">—</code></div>
-        <div class="result-box mono" id="revResult">响应会显示在这里</div>
+        <div class="result-box mono" id="revResult">版本号会显示在这里</div>
       </section>
     </div>
 
@@ -133,7 +133,7 @@
     </div>
   </div>
 
-  <div class="grid-2" style="margin-top:18px;">
+  <div class="grid-2 align-stretch" style="margin-top:18px;">
     <!-- ============ 第二行：0x11 刷图 / 0x20 擦除 ============ -->
     <div class="col">
 

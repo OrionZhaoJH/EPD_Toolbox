@@ -359,7 +359,8 @@
       // 0x00 的应答没有响应码，PAYLOAD 就是 3 字节版本号
       const rev = BLE.hex(frame.data);
       el.revMs.textContent = ms + ' ms';
-      el.revResult.textContent = 'IC Revision：' + (rev || '（响应无数据）') + '\n帧：' + BLE.hex(frame.raw);
+      // 结果框只放版本号本身；完整响应帧由 ble.js 的 rx 日志记到底部收发日志里
+      el.revResult.textContent = rev ? 'IC Revision：' + rev : '（响应无数据）';
       setCmdState(el.revState, 'ok', '成功');
       log('ok', '读版本成功：' + (rev || '无数据') + '（' + ms + ' ms）');
     } catch (err) {
