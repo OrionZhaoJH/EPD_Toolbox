@@ -16,6 +16,7 @@
     result: null, // { ids, bytes, imageData, width, height }
     zoom: 'fit',
     busy: false,
+    sending: false, // 送图 / 刷图执行中（与转换的 busy 分开，互不干扰）
     autoTimer: null,
   };
 
@@ -54,6 +55,23 @@
     hexOut: $('hexOut'),
     logBox: $('logBox'),
     btnClearLog: $('btnClearLog'),
+    // 4 · 送图 / 刷图
+    bleState: $('bleState'),
+    bleStateText: $('bleStateText'),
+    bleDeviceName: $('bleDeviceName'),
+    btnConnect: $('btnConnect'),
+    btnDisconnect: $('btnDisconnect'),
+    slotSelect: $('slotSelect'),
+    btnSend: $('btnSend'),
+    btnRefresh: $('btnRefresh'),
+    btnCancelSend: $('btnCancelSend'),
+    sendState: $('sendState'),
+    sendMs: $('sendMs'),
+    sendBar: $('sendBar'),
+    sendText: $('sendText'),
+    sendSpeed: $('sendSpeed'),
+    sendFrame: $('sendFrame'),
+    refreshFrame: $('refreshFrame'),
   };
 
   /* ---------------- 日志 ---------------- */
@@ -73,6 +91,109 @@
     el.logBox.appendChild(line);
     while (el.logBox.childElementCount > 400) el.logBox.removeChild(el.logBox.firstChild);
     if (pin) el.logBox.scrollTop = el.logBox.scrollHeight;
+  }
+
+  /* ---------------- 送图 / 刷图（0x30 / 0x11） ----------------
+     沿用命令测试页的规矩（docs/conventions.md）：
+     ① 命令互斥：任一命令执行期间，除连接以外的命令控件全部禁用；
+     ② 长命令用「空闲超时 + 心跳保活」，不用固定总超时；
+     ③ 送图先擦后写、逐片等 DONE，单片最多试 3 次；
+     ④ 送图只写 Flash 不显示，要显示必须再发 0x11。
+     送图与刷图共用同一个槽位下拉 el.slotSelect。 */
+  const BLE = window.EPDBLE || null;
+  const SLOT_MAX = 10; // 固件 FLASH_IMAGE_MAX_COUNT = 11，槽号 0~10
+  let locked = false; // 命令互斥锁
+  let sendAbort = false; // 中止送图
+
+  const client = BLE
+    ? BLE.create({
+        onLog: (type, text) => log(type, text),
+        onStatus: (st, text) => {
+          setBleStatus(st, text);
+          const connected = st === 'connected';
+          setBleConnected(connected);
+          el.bleDeviceName.textContent = connected && client.device ? client.device.name || '' : '';
+        },
+        onHeartbeat: (cmd, count) => {
+          // 0x01 只是「还在处理」：第一次心跳补一句说明，后续不再刷屏
+          if (count !== 1) return;
+          if (cmd === BLE.CMD.UPDATE_COLOR) log('sys', '刷屏仍在进行，收到设备心跳（保持等待）');
+          else if (cmd === BLE.CMD.UPDATE_IMAGE) log('sys', '刷图仍在进行，收到设备心跳（保持等待）');
+          else if (cmd === BLE.CMD.FLASH_ERASE) log('sys', '擦除仍在进行，收到设备心跳（保持等待）');
+        },
+      })
+    : null;
+
+  function fillSlotSelect() {
+    for (let i = 0; i <= SLOT_MAX; i++) {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = '槽 ' + i;
+      el.slotSelect.appendChild(opt);
+    }
+    el.slotSelect.value = '0';
+  }
+
+  function setBleStatus(st, text) {
+    const connected = st === 'connected';
+    const label = connected ? '已连接' : st === 'connecting' ? '连接中…' : '未连接';
+    el.bleState.className = 'badge ' + (connected ? 'ok' : st === 'connecting' ? 'ready' : 'off');
+    el.bleState.title = text || label;
+    el.bleStateText.textContent = label;
+  }
+
+  function setBleConnected(on) {
+    el.btnConnect.disabled = on;
+    el.btnDisconnect.disabled = !on;
+    if (!on) locked = false; // 断开时清锁，避免重连后一直锁着
+    applyCommandEnabled();
+  }
+
+  /** 命令卡片的状态徽章：「未执行 / 执行中… / 完成 / 失败」 */
+  function setSendState(kind, text) {
+    el.sendState.className = 'badge ' + (kind === 'ok' ? 'ok' : kind === 'running' ? 'ready' : 'off');
+    el.sendState.textContent = text;
+  }
+
+  function setSendProgress(ratio, text) {
+    el.sendBar.style.width = Math.max(0, Math.min(1, ratio)) * 100 + '%';
+    if (text != null) el.sendText.textContent = text;
+  }
+
+  /** 送图只认正好 172800 字节（480×720 4bpp），转换结果尺寸不对就禁用按钮 */
+  function imageReady() {
+    return !!(BLE && state.result && state.result.bytes && state.result.bytes.length === BLE.IMAGE_BYTES);
+  }
+
+  /**
+   * 命令互斥的唯一入口：命令控件可用 = 已连接 && 未锁定（新增命令必须挂到这里，
+   * 否则会绕过互斥，见 docs/conventions.md §1）。
+   */
+  function applyCommandEnabled() {
+    const usable = !!client && client.connected && !locked;
+    el.slotSelect.disabled = !usable;
+    el.btnSend.disabled = !usable || !imageReady();
+    el.btnRefresh.disabled = !usable;
+    if (!usable) el.btnCancelSend.disabled = true;
+    updateFrames();
+  }
+
+  function setCommandLock(value) {
+    locked = value;
+    applyCommandEnabled();
+  }
+
+  /** 槽位或转换结果一变就重算两条命令帧，方便对照协议表 / 抓包 */
+  function updateFrames() {
+    if (!BLE) return;
+    const slot = Number(el.slotSelect.value) || 0;
+    el.refreshFrame.textContent = BLE.hex(BLE.buildFrame(BLE.CMD.UPDATE_IMAGE, [slot]));
+    if (imageReady()) {
+      const head = BLE.buildImageChunkFrame(slot, 0, state.result.bytes.subarray(0, BLE.CHUNK_PAYLOAD));
+      el.sendFrame.textContent = BLE.hex(head.subarray(0, 16)) + ' … (' + head.length + ' 字节)';
+    } else {
+      el.sendFrame.textContent = '—（需要 480 × 720 的转换结果）';
+    }
   }
 
   /* ---------------- 初始化控件 ---------------- */
@@ -330,6 +451,7 @@
     el.outMeta.textContent = w + '×' + h + ' · ' + bytes.length.toLocaleString() + ' 字节';
     el.hexOut.value = Codec.toHex(bytes, 128);
     [el.btnExportBin, el.btnExportC, el.btnCopyHex].forEach((b) => (b.disabled = false));
+    applyCommandEnabled(); // 尺寸是否是 480×720 决定「送图」按钮能不能点
   }
 
   function download(name, content, mime) {
@@ -370,6 +492,158 @@
     }
   });
 
+  /* ---------------- 连接设备 ---------------- */
+  el.btnConnect.addEventListener('click', async () => {
+    if (!client) return;
+    try {
+      await client.connect({}); // 默认 FFE0 服务 / FFE3 写 / FFE4 通知，列出全部设备
+    } catch (err) {
+      if (err && err.name === 'NotFoundError') log('sys', '已取消设备选择');
+      else log('err', '连接失败：' + (err && err.message ? err.message : err));
+      setBleStatus('idle');
+      setBleConnected(false);
+    }
+  });
+
+  el.btnDisconnect.addEventListener('click', () => {
+    if (!client) return;
+    client.disconnect();
+    setBleConnected(false);
+  });
+
+  el.slotSelect.addEventListener('change', updateFrames);
+
+  /* ---------------- 送图（0x30）：擦除同槽 → 逐片写 ---------------- */
+  el.btnSend.addEventListener('click', async () => {
+    if (!client) return;
+    if (state.sending) return log('sys', '上一条命令还在执行，稍等');
+    if (!client.connected) return log('err', '请先连接设备');
+    if (!imageReady()) return log('err', '送图需要 480 × 720 的转换结果（172800 字节），当前结果尺寸不符');
+
+    const slot = Number(el.slotSelect.value) || 0;
+    const bytes = state.result.bytes; // 先取快照：送图期间再转换也不影响这一轮发送
+    state.sending = true;
+    setCommandLock(true);
+    sendAbort = false;
+    el.btnCancelSend.disabled = false;
+    el.sendMs.textContent = '—';
+    el.sendSpeed.textContent = '—';
+    setSendState('running', '擦除中…');
+    setSendProgress(0, '准备中…');
+    const t0 = performance.now();
+    let retries = 0;
+
+    try {
+      // 1) 先擦除目标槽并等 DONE —— 协议要求写图前槽是干净的
+      setSendProgress(0, '擦除槽 ' + slot + ' …');
+      await client.eraseSlot(slot, {
+        onRetry: (info) => log('sys', '擦除第 ' + info.attempt + ' 次失败（' + info.error.message + '），重发'),
+      });
+      log('ok', '槽 ' + slot + ' 擦除完成，开始送图（' + bytes.length + ' 字节 / ' + BLE.IMAGE_CHUNKS + ' 片）');
+
+      // 2) 逐片写入，每片等 DONE（天然流控，避免固件忙时回 BUSY 丢片）
+      setSendState('running', '送图中…');
+      let lastSent = 0;
+      let lastTime = performance.now();
+      const res = await client.writeImage(slot, bytes, {
+        idleMs: 5000,
+        attempts: 3, // 每片最多试 3 次（GATT 并发 / 瞬时错误重发）
+        shouldStop: () => sendAbort,
+        onProgress: (p) => {
+          const ratio = p.sent / p.total;
+          setSendProgress(
+            ratio,
+            '送图 ' + (p.index + 1) + '/' + p.count + ' 片 · ' + (ratio * 100).toFixed(1) + '% · ' +
+              p.sent.toLocaleString() + '/' + p.total.toLocaleString() + ' 字节' +
+              (retries ? ' · 重试 ' + retries + ' 次' : '')
+          );
+          const now = performance.now();
+          if (now - lastTime > 400) {
+            const kbps = (p.sent - lastSent) / ((now - lastTime) / 1000) / 1024;
+            el.sendSpeed.textContent = kbps.toFixed(1) + ' KB/s';
+            lastSent = p.sent;
+            lastTime = now;
+          }
+        },
+        onRetry: (info) => {
+          retries++;
+          log('sys', '第 ' + (info.index + 1) + ' 片第 ' + info.attempt + ' 次失败（' + info.error.message + '），重发');
+          el.sendText.textContent = '重发第 ' + (info.index + 1) + ' 片（第 ' + info.attempt + ' 次重试）…';
+        },
+      });
+
+      const sec = (performance.now() - t0) / 1000;
+      el.sendMs.textContent = sec.toFixed(1) + ' s';
+      setSendProgress(
+        1,
+        '完成：' + res.chunks + ' 片 / ' + res.bytes.toLocaleString() + ' 字节' +
+          (retries ? ' · 重试 ' + retries + ' 次' : '') + ' · 已落盘，点「刷图」显示'
+      );
+      setSendState('ok', '完成 · 槽 ' + slot + ' 已写入');
+      log(
+        'ok',
+        '送图完成：槽 ' + slot + '，' + res.chunks + ' 片，' + sec.toFixed(1) + ' s' +
+          (retries ? '，重试 ' + retries + ' 次' : '') + '（数据已落盘，点「刷图」才会显示）'
+      );
+    } catch (err) {
+      const sec = (performance.now() - t0) / 1000;
+      el.sendMs.textContent = sec.toFixed(1) + ' s';
+      const aborted = sendAbort;
+      setSendState('err', aborted ? '已中止' : '失败');
+      setSendProgress(0, (aborted ? '中止' : '送图失败') + '：' + err.message);
+      log('err', (aborted ? '已中止' : '送图失败') + '：' + err.message);
+    } finally {
+      state.sending = false;
+      setCommandLock(false);
+      el.btnCancelSend.disabled = true;
+      sendAbort = false;
+    }
+  });
+
+  /* ---------------- 刷图（0x11）：把该槽已有的图刷到屏上 ---------------- */
+  el.btnRefresh.addEventListener('click', async () => {
+    if (!client) return;
+    if (state.sending) return log('sys', '上一条命令还在执行，稍等');
+    if (!client.connected) return log('err', '请先连接设备');
+
+    const slot = Number(el.slotSelect.value) || 0;
+    state.sending = true;
+    setCommandLock(true);
+    el.sendMs.textContent = '—';
+    el.sendSpeed.textContent = '—';
+    setSendState('running', '刷图中…');
+    setSendProgress(1, '刷图（0x11 · 槽 ' + slot + '）…');
+    const t0 = performance.now();
+
+    try {
+      log('sys', '开始刷图：0x11 槽 ' + slot + '（该命令的完成通知 CMD 是 0x10，属固件约定）');
+      await client.updateImage(slot, {
+        onRetry: (info) => log('sys', '刷图第 ' + info.attempt + ' 次失败（' + info.error.message + '），重发'),
+      });
+      const sec = (performance.now() - t0) / 1000;
+      el.sendMs.textContent = sec.toFixed(1) + ' s';
+      setSendProgress(1, '完成：槽 ' + slot + ' 已显示到屏上');
+      setSendState('ok', '完成 · 槽 ' + slot + ' 已显示');
+      log('ok', '刷图完成：槽 ' + slot + ' 已显示到屏上（' + sec.toFixed(1) + ' s）');
+    } catch (err) {
+      const sec = (performance.now() - t0) / 1000;
+      el.sendMs.textContent = sec.toFixed(1) + ' s';
+      setSendState('err', '失败');
+      setSendProgress(0, '刷图失败：' + err.message);
+      log('err', '刷图失败：' + err.message + '（该槽可能还没送过图，先「送图」再「刷图」）');
+    } finally {
+      state.sending = false;
+      setCommandLock(false);
+    }
+  });
+
+  el.btnCancelSend.addEventListener('click', () => {
+    if (!state.sending) return;
+    sendAbort = true;
+    el.btnCancelSend.disabled = true;
+    log('sys', '已请求中止送图，等当前分片返回后停止');
+  });
+
   /* ---------------- 其它 ---------------- */
   el.btnClearLog.addEventListener('click', () => {
     el.logBox.innerHTML = '';
@@ -381,11 +655,25 @@
   onScroll();
 
   /* ---------------- 启动 ---------------- */
+  fillSlotSelect();
+  setBleStatus('idle');
+  setBleConnected(false);
+  setSendProgress(0, '等待开始');
   initSelects();
   updateSizeHint();
   const test = Codec.selfTest();
   if (test.ok) log('ok', '编解码自检通过（4bpp 打包 / 反解一致）');
   else log('err', '编解码自检失败：' + test.reason);
+
+  if (!BLE) {
+    el.btnConnect.disabled = true;
+    log('err', '未加载 assets/js/ble.js，送图 / 刷图不可用（只能转换和导出）');
+  } else if (!navigator.bluetooth) {
+    el.btnConnect.disabled = true;
+    log('sys', '当前浏览器不支持 Web Bluetooth：可以转换和导出，但不能送图 / 刷图。请用 Chrome / Edge（HTTPS 或 localhost）');
+  } else {
+    log('sys', '送图 / 刷图已就绪：连接设备后，同一个槽位下拉框先后「送图（0x30）」「刷图（0x11）」');
+  }
 
   /* 演示模式：?demo=1 时生成一张测试图，方便没有素材时验证效果 */
   function loadDemo() {

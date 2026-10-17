@@ -29,7 +29,8 @@
     <h1><span class="icon">🖼️</span> E6 六色图像转换</h1>
     <p>
       选择图片 → 抖动量化为黑白黄红蓝绿 6 色 → 生成 4bpp 面板数据（列优先、高半字节在上）。
-      可导出 <code>.bin</code> / C 数组；设备命令（读版本、刷纯色、擦除槽）集中在
+      结果可以直接连设备<b>送图</b>（<code>0x30</code>）再<b>刷图</b>（<code>0x11</code>）显示，
+      也可以导出 <code>.bin</code> / C 数组；其余命令（读版本、刷纯色、擦除槽）在
       <a href="./ble-console.html">BLE 命令测试</a>页。
     </p>
   </header>
@@ -146,9 +147,9 @@
         <textarea class="code-box" id="hexOut" readonly placeholder="转换后这里显示前 128 字节的十六进制…"></textarea>
 
         <div class="hint" style="margin-top:10px;">
-          图像写入 Flash 需要固件补一条写图命令（当前只有 <code>0x00 / 0x10 / 0x20</code>），
-          现阶段请导出 <code>.bin</code>；刷屏相关命令可以到
-          <a href="./ble-console.html">BLE 命令测试</a>页逐条下发。
+          转换结果可以直接在右侧「4 · 送图 / 刷图」里发到设备（先 <code>0x20</code> 擦、再 <code>0x30</code> 写、
+          最后 <code>0x11</code> 显示）；只想离线保存或塞进固件时，用上面的导出按钮。
+          送图要求尺寸正好 480 × 720（172800 字节），其它分辨率只能导出。
         </div>
       </section>
     </div>
@@ -178,9 +179,86 @@
         </div>
       </section>
 
+      <!-- ============ 4 · 送图 / 刷图（0x30 / 0x11） ============
+           送图与刷图共用同一个图片槽下拉 #slotSelect（先写哪槽、再刷哪槽，不用来回切）：
+           - 送图 #btnSend：0x20 擦除同槽等 DONE → 0x30 逐片写（233 字节 × 742 片，帧 244 字节）；
+           - 刷图 #btnRefresh：0x11 把该槽已经写好的图刷到屏上，不改 Flash 内容；
+           - 中止 #btnCancelSend：送图过程中在下一片前停下（已写入的分片保持不动）。
+           两个命令互斥（docs/conventions.md §1）：任一条执行中，连接以外的命令控件全部禁用。
+           送图要求当前转换结果正好 172800 字节（480×720 4bpp），否则 #btnSend 保持禁用。
+           控件：连接 #btnConnect / #btnDisconnect，状态 #bleState / #bleStateText / #bleDeviceName；
+           进度 #sendBar / #sendText / #sendSpeed，状态 #sendState / #sendMs；
+           帧预览 #sendFrame（送图首片）、#refreshFrame（0x11 整帧）。
+           送图期间 ble.js 会设 client.silentCmd = 0x30，742 片不逐条写日志，只靠进度条。 -->
       <section class="card">
         <div class="card-title">
-          <span>4 · 日志</span>
+          <span>4 · 送图 / 刷图</span>
+          <span class="sub">0x30 写 Flash · 0x11 显示</span>
+        </div>
+
+        <div class="row" style="align-items:flex-end;">
+          <div class="form-group" style="flex:0 0 auto;">
+            <label>连接状态</label>
+            <div class="control-line">
+              <span class="badge off" id="bleState"><span id="bleStateText">未连接</span></span>
+              <span class="kv" id="bleDeviceName"></span>
+            </div>
+          </div>
+          <span class="spacer"></span>
+          <div class="form-group" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <div class="row">
+              <button class="btn btn-primary" id="btnConnect" type="button">连接设备</button>
+              <button class="btn" id="btnDisconnect" type="button" disabled>断开</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="row" style="align-items:flex-end;">
+          <div class="form-group" style="flex:0 1 170px;">
+            <label for="slotSelect">图片槽（送图 / 刷图共用）</label>
+            <select id="slotSelect"></select>
+          </div>
+          <div class="form-group" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <div class="row">
+              <button class="btn btn-primary" id="btnSend" type="button" disabled>送图（0x30）</button>
+              <button class="btn" id="btnRefresh" type="button" disabled>刷图（0x11）</button>
+              <button class="btn" id="btnCancelSend" type="button" disabled>中止</button>
+            </div>
+          </div>
+          <span class="spacer"></span>
+          <div class="form-group" style="flex:0 0 auto;">
+            <label>状态</label>
+            <div class="control-line">
+              <span class="badge off" id="sendState">未执行</span>
+              <span class="kv">耗时 <b id="sendMs">—</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="progress" style="margin-top:14px;"><i id="sendBar"></i></div>
+        <div class="row" style="margin-top:8px; justify-content:space-between;">
+          <span class="kv" id="sendText">等待开始</span>
+          <span class="kv">速度 <b id="sendSpeed">—</b></span>
+        </div>
+
+        <div class="frame-line">送图首片 <code class="mono" id="sendFrame">—</code></div>
+        <div class="frame-line">刷图帧 <code class="mono" id="refreshFrame">—</code></div>
+
+        <p class="hint" style="margin-top:8px;">
+          <b>送图</b>先 <code>0x20</code> 擦除该槽、再 <code>0x30</code> 逐片写（233 字节 × 742 片，每片等 DONE），
+          只把数据写进 Flash，<b>屏上不会有变化</b>；要显示再点<b>刷图</b>（<code>0x11</code>）。
+          槽里没数据（刚擦除过）时刷图只会刷出空白。
+          244 字节的写需要 ATT MTU ≥ 247，Web Bluetooth 没有主动请求 MTU 的接口，Chrome 会自动协商。
+        </p>
+      </section>
+
+      <section class="card">
+        <div class="card-title">
+          <span>5 · 日志</span>
           <button class="btn btn-sm" id="btnClearLog" type="button">清空</button>
         </div>
         <div class="log-box" id="logBox"></div>
@@ -197,6 +275,7 @@
 </div>
 
 <script src="assets/js/e6-codec.js"></script>
+<script src="assets/js/ble.js"></script>
 <script src="assets/js/e6-page.js"></script>
 </body>
 </html>
