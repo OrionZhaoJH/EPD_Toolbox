@@ -1,0 +1,16 @@
+# 操作系统 / 编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+
+# 依赖与构建产物（本项目为纯静态，一般不会有）
+node_modules/
+dist/
+*.log
+
+# 临时文件
+_tmp/
+*.tmp
