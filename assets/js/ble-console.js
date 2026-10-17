@@ -49,6 +49,17 @@
     eraseState: $('eraseState'),
     eraseMs: $('eraseMs'),
 
+    upSlot: $('upSlot'),
+    btnUploadTest: $('btnUploadTest'),
+    btnUploadCancel: $('btnUploadCancel'),
+    upState: $('upState'),
+    upMs: $('upMs'),
+    upBar: $('upBar'),
+    upText: $('upText'),
+    upSpeed: $('upSpeed'),
+    upPreview: $('upPreview'),
+    upFrame: $('upFrame'),
+
     logBox: $('logBox'),
     btnClearLog: $('btnClearLog'),
   };
@@ -56,6 +67,8 @@
   let selectedColor = 0; // 默认黑
   let busy = false; // 同一时刻只跑一条命令，避免响应互相顶掉
   let locked = false; // 有命令在执行：所有命令卡片禁用，直到完成/超时/出错
+  let testImage = null; // 懒生成的六色棋盘图 { bytes, imageData }
+  let uploadAbort = false; // 送图中止请求
 
   /* 长命令（刷屏可能几十秒）的进度：每 200ms 刷一次徽章，显示耗时与心跳次数 */
   let ticker = null;
@@ -171,9 +184,64 @@
 
   /** 每张卡片下方的「发送帧」预览，参数一变就重算，方便对照抓包 */
   function updateFrames() {
+    const slot = Number(el.slotSelect.value) || 0;
     el.revFrame.textContent = BLE.hex(BLE.buildFrame(CMD.REVISION, [0x00]));
     el.colorFrame.textContent = BLE.hex(BLE.buildFrame(CMD.UPDATE_COLOR, [selectedColor]));
-    el.eraseFrame.textContent = BLE.hex(BLE.buildFrame(CMD.FLASH_ERASE, [Number(el.slotSelect.value) || 0]));
+    el.eraseFrame.textContent = BLE.hex(BLE.buildFrame(CMD.FLASH_ERASE, [slot]));
+    el.upSlot.textContent = '槽 ' + slot;
+    if (testImage) {
+      const head = BLE.buildImageChunkFrame(slot, 0, testImage.bytes.subarray(0, BLE.CHUNK_PAYLOAD));
+      el.upFrame.textContent = BLE.hex(head.subarray(0, 16)) + ' … (' + head.length + ' 字节)';
+    }
+  }
+
+  /* ---------------- 0x30 测试送图：六色棋盘图 ---------------- */
+  /**
+   * 生成 480×720 的六色棋盘：60px 方格，(cx + cy*2) % 6 保证上下左右相邻格不同色，
+   * 直接走阈值量化（颜色本来就是调色板原色，不会被抖动改掉）再按 4bpp 打包。
+   */
+  function buildTestImage() {
+    const w = Codec.DEFAULT_WIDTH;
+    const h = Codec.DEFAULT_HEIGHT;
+    const cell = 60;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const cols = Math.ceil(w / cell);
+    const rows = Math.ceil(h / cell);
+    for (let cy = 0; cy < rows; cy++) {
+      for (let cx = 0; cx < cols; cx++) {
+        const color = Codec.PALETTE[(cx + cy * 2) % Codec.PALETTE.length];
+        ctx.fillStyle = color.hex;
+        ctx.fillRect(cx * cell, cy * cell, cell, cell);
+      }
+    }
+    const src = ctx.getImageData(0, 0, w, h);
+    const res = Codec.dither(src, { algo: 'threshold' });
+    const bytes = Codec.pack(res.ids, w, h);
+    return { bytes, imageData: res.imageData };
+  }
+
+  function getTestImage() {
+    if (!testImage) testImage = buildTestImage();
+    return testImage;
+  }
+
+  /** 生成一次并画到预览 canvas 上（启动时调用） */
+  function initTestImage() {
+    const img = getTestImage();
+    const canvas = el.upPreview;
+    canvas.width = img.imageData.width;
+    canvas.height = img.imageData.height;
+    canvas.getContext('2d').putImageData(img.imageData, 0, 0);
+    log('sys', '已生成六色棋盘测试图：' + img.imageData.width + '×' + img.imageData.height + '，' + img.bytes.length + ' 字节');
+    updateFrames();
+  }
+
+  function setProgress(ratio, text) {
+    el.upBar.style.width = Math.max(0, Math.min(1, ratio)) * 100 + '%';
+    if (text != null) el.upText.textContent = text;
   }
 
   /**
@@ -184,8 +252,10 @@
     const usable = !!client.connected && !locked;
     el.btnRev.disabled = !usable;
     el.btnErase.disabled = !usable;
+    el.btnUploadTest.disabled = !usable;
     el.slotSelect.disabled = !usable;
     Array.from(el.colorGrid.children).forEach((btn) => (btn.disabled = !usable));
+    if (!usable) el.btnUploadCancel.disabled = true;
   }
 
   /**
@@ -339,6 +409,79 @@
     }
   });
 
+  /* ---------------- 0x30 测试送图 ---------------- */
+  el.btnUploadTest.addEventListener('click', async () => {
+    if (busy) return log('sys', '上一条命令还在执行，稍等');
+    const slot = Number(el.slotSelect.value) || 0;
+    const img = getTestImage();
+
+    busy = true;
+    setCommandLock(true);
+    uploadAbort = false;
+    el.btnUploadCancel.disabled = false;
+    el.upMs.textContent = '—';
+    el.upSpeed.textContent = '—';
+    setProgress(0, '准备中…');
+    const t0 = performance.now();
+
+    try {
+      // 1) 先擦除目标槽并等 DONE —— 协议要求写图前槽是干净的
+      setCmdState(el.upState, 'running', '擦除中…');
+      setProgress(0, '擦除槽 ' + slot + ' …');
+      await client.eraseSlot(slot);
+      log('ok', '槽 ' + slot + ' 擦除完成，开始送图（' + img.bytes.length + ' 字节 / ' + BLE.IMAGE_CHUNKS + ' 片）');
+
+      // 2) 逐片写入，每片等 DONE
+      setCmdState(el.upState, 'running', '送图中…');
+      let lastSent = 0;
+      let lastTime = performance.now();
+      const res = await client.writeImage(slot, img.bytes, {
+        idleMs: 5000,
+        shouldStop: () => uploadAbort,
+        onProgress: (p) => {
+          const ratio = p.sent / p.total;
+          setProgress(
+            ratio,
+            '送图 ' + (p.index + 1) + '/' + p.count + ' 片 · ' + (ratio * 100).toFixed(1) + '% · ' +
+              p.sent.toLocaleString() + '/' + p.total.toLocaleString() + ' 字节'
+          );
+          const now = performance.now();
+          if (now - lastTime > 400) {
+            const kbps = (p.sent - lastSent) / ((now - lastTime) / 1000) / 1024;
+            el.upSpeed.textContent = kbps.toFixed(1) + ' KB/s';
+            lastSent = p.sent;
+            lastTime = now;
+          }
+        },
+      });
+
+      const sec = (performance.now() - t0) / 1000;
+      el.upMs.textContent = sec.toFixed(1) + ' s';
+      setProgress(1, '完成：' + res.chunks + ' 片 / ' + res.bytes.toLocaleString() + ' 字节');
+      setCmdState(el.upState, 'ok', '完成 · 槽 ' + slot);
+      log('ok', '送图完成：槽 ' + slot + '，' + res.chunks + ' 片，' + sec.toFixed(1) + ' s（固件暂无刷图命令，数据已落盘）');
+    } catch (err) {
+      const sec = (performance.now() - t0) / 1000;
+      el.upMs.textContent = sec.toFixed(1) + ' s';
+      const aborted = uploadAbort;
+      setCmdState(el.upState, 'err', aborted ? '已中止' : '失败');
+      el.upText.textContent = (aborted ? '已中止' : '失败') + '：' + err.message;
+      log('err', '送图' + (aborted ? '中止' : '失败') + '：' + err.message);
+    } finally {
+      busy = false;
+      setCommandLock(false);
+      el.btnUploadCancel.disabled = true;
+      uploadAbort = false;
+    }
+  });
+
+  el.btnUploadCancel.addEventListener('click', () => {
+    if (!busy) return;
+    uploadAbort = true;
+    el.btnUploadCancel.disabled = true;
+    log('sys', '已请求中止送图，等当前分片返回后停止');
+  });
+
   el.btnClearLog.addEventListener('click', () => {
     el.logBox.innerHTML = '';
   });
@@ -351,14 +494,16 @@
   /* ---------------- 启动 ---------------- */
   initSlots();
   initColors();
+  initTestImage(); // 六色棋盘图 + 预览（同时刷新第一片帧头预览）
   updateFrames();
   setConnected(false);
+  setProgress(0, '等待开始');
 
   if (!navigator.bluetooth) {
     el.bleWarn.hidden = false;
     el.btnConnect.disabled = true;
     log('sys', '当前浏览器不支持 Web Bluetooth，仅能查看发送帧');
   } else {
-    log('sys', '命令测试页就绪：0x00 读版本 / 0x10 刷纯色 / 0x20 擦除图片槽');
+    log('sys', '命令测试页就绪：0x00 读版本 / 0x10 刷纯色 / 0x20 擦除图片槽 / 0x30 测试送图');
   }
 })();

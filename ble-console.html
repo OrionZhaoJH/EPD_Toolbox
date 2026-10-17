@@ -174,6 +174,64 @@
     </div>
   </div>
 
+  <!-- ============ 0x30 测试送图 ============ -->
+  <section class="card" style="margin-top:18px;">
+    <div class="card-title">
+      <span>0x30 · 测试送图（六色棋盘）</span>
+      <span class="sub">CHAR3_CMD_30_WRITE_IMAGE</span>
+    </div>
+    <p class="hint">
+      送图前先对同一槽发 <code>0x20</code> 擦除并等待 DONE，成功后再按 <code>233</code> 字节分片写入
+      <b>480×720 4bpp</b> 的六色棋盘图：共 <b>742</b> 片，每片固定 244 字节帧、offset 递增 233，
+      <b>每片等到 DONE 才发下一片</b>（天然流控）。固件暂无刷图命令（<code>0x11</code>），
+      写完后数据已落盘，但不会自动显示到屏上。
+    </p>
+
+    <div class="row" style="align-items:flex-end; margin-top:12px;">
+      <div class="form-group" style="flex:0 0 auto;">
+        <label>目标槽（跟随上方「擦除图片槽」）</label>
+        <div class="control-line"><span class="badge off" id="upSlot">槽 0</span></div>
+      </div>
+      <div class="form-group" style="flex:0 0 auto;">
+        <label>&nbsp;</label>
+        <button class="btn btn-primary" id="btnUploadTest" type="button" disabled>擦除并送图</button>
+      </div>
+      <div class="form-group" style="flex:0 0 auto;">
+        <label>&nbsp;</label>
+        <button class="btn" id="btnUploadCancel" type="button" disabled>中止</button>
+      </div>
+      <span class="spacer"></span>
+      <div class="form-group" style="flex:0 0 auto;">
+        <label>状态</label>
+        <div class="control-line">
+          <span class="badge off" id="upState">未执行</span>
+          <span class="kv">耗时 <b id="upMs">—</b></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="progress" style="margin-top:14px;"><i id="upBar"></i></div>
+    <div class="row" style="margin-top:8px; justify-content:space-between;">
+      <span class="kv" id="upText">等待开始</span>
+      <span class="kv">速度 <b id="upSpeed">—</b></span>
+    </div>
+
+    <div class="row" style="margin-top:14px; align-items:flex-start; gap:16px;">
+      <div class="preview-wrap" style="flex:0 0 auto; padding:6px; max-height:none;">
+        <canvas id="upPreview" width="480" height="720" style="width:140px; height:auto; background:#fff;"></canvas>
+      </div>
+      <div class="stack" style="flex:1; min-width:220px;">
+        <span class="kv">图像 <b>480 × 720</b> · <b>172800</b> 字节 · 4bpp · 6 色棋盘</span>
+        <span class="kv">分片 <b>233</b> 字节/片（帧 <b>244</b> 字节）· 共 <b>742</b> 片</span>
+        <span class="kv">第一片帧头 <code class="mono" id="upFrame">—</code></span>
+        <span class="hint">
+          244 字节的写需要 ATT MTU ≥ 247。Web Bluetooth 没有主动请求 MTU 的接口，
+          Chrome 会自动协商；若写入报 GATT 长度错误，说明 MTU 没到 247。
+        </span>
+      </div>
+    </div>
+  </section>
+
   <footer class="page-foot">
     <span>EPD Toolbox · BLE 命令测试</span>
     <a href="./e6-image.html">图像转换</a>

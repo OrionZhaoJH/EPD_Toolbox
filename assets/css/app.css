@@ -467,6 +467,23 @@ a.tool-card:hover {
   word-break: break-all;
 }
 
+/* 送图进度条 */
+.progress {
+  height: 8px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.progress > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 5px;
+  background: var(--accent);
+  transition: width .18s linear;
+}
+
 /* --------------------------------------------------------------------------
    数据输出
    -------------------------------------------------------------------------- */
