@@ -82,7 +82,7 @@
   </section>
 
   <div class="grid-2">
-    <!-- ============ 左列：0x00 读版本 / 0x10 刷纯色 ============ -->
+    <!-- ============ 第一行：0x00 读版本 / 0x10 刷纯色 ============ -->
     <div class="col">
 
       <section class="card">
@@ -105,6 +105,9 @@
         <div class="frame-line">发送帧 <code class="mono" id="revFrame">—</code></div>
         <div class="result-box mono" id="revResult">响应会显示在这里</div>
       </section>
+    </div>
+
+    <div class="col">
 
       <section class="card">
         <div class="card-title">
@@ -128,41 +131,11 @@
         <div class="frame-line">发送帧 <code class="mono" id="colorFrame">—</code></div>
       </section>
     </div>
+  </div>
 
-    <!-- ============ 右列：0x20 擦除 / 0x11 刷图 / 收发日志 ============ -->
+  <div class="grid-2" style="margin-top:18px;">
+    <!-- ============ 第二行：0x11 刷图 / 0x20 擦除 ============ -->
     <div class="col">
-
-      <section class="card">
-        <div class="card-title">
-          <span>0x20 · 擦除图片槽</span>
-          <span class="sub">CHAR3_CMD_20_FLASH_ERASE</span>
-        </div>
-        <p class="hint">
-          擦除指定槽位的图片数据（每槽 172800 字节，按 4096 对齐占 43 个扇区），
-          执行前会二次确认。擦除没有心跳，页面按 60 s 空闲上限等待完成。
-        </p>
-
-        <div class="row" style="align-items:flex-end; margin-top:12px;">
-          <div class="form-group" style="flex:0 1 150px;">
-            <label for="slotSelect">槽号</label>
-            <select id="slotSelect"></select>
-          </div>
-          <div class="form-group" style="flex:0 0 auto;">
-            <label>&nbsp;</label>
-            <button class="btn btn-danger" id="btnErase" type="button" disabled>擦除该槽</button>
-          </div>
-          <span class="spacer"></span>
-          <div class="form-group" style="flex:0 0 auto;">
-            <label>&nbsp;</label>
-            <div class="control-line">
-              <span class="badge off" id="eraseState">未执行</span>
-              <span class="kv">耗时 <b id="eraseMs">—</b></span>
-            </div>
-          </div>
-        </div>
-
-        <div class="frame-line">发送帧 <code class="mono" id="eraseFrame">—</code></div>
-      </section>
 
       <section class="card">
         <div class="card-title">
@@ -202,13 +175,40 @@
           所以刷图的完成帧在日志里是 <code class="mono">55 AA 00 08 10 02 00 0D</code>，页面已按此兼容。
         </p>
       </section>
+    </div>
+
+    <div class="col">
 
       <section class="card">
         <div class="card-title">
-          <span>收发日志</span>
-          <button class="btn btn-sm" id="btnClearLog" type="button">清空</button>
+          <span>0x20 · 擦除图片槽</span>
+          <span class="sub">CHAR3_CMD_20_FLASH_ERASE</span>
         </div>
-        <div class="log-box" id="logBox"></div>
+        <p class="hint">
+          擦除指定槽位的图片数据（每槽 172800 字节，按 4096 对齐占 43 个扇区），
+          执行前会二次确认。擦除没有心跳，页面按 60 s 空闲上限等待完成。
+        </p>
+
+        <div class="row" style="align-items:flex-end; margin-top:12px;">
+          <div class="form-group" style="flex:0 1 150px;">
+            <label for="slotSelect">槽号</label>
+            <select id="slotSelect"></select>
+          </div>
+          <div class="form-group" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <button class="btn btn-danger" id="btnErase" type="button" disabled>擦除该槽</button>
+          </div>
+          <span class="spacer"></span>
+          <div class="form-group" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <div class="control-line">
+              <span class="badge off" id="eraseState">未执行</span>
+              <span class="kv">耗时 <b id="eraseMs">—</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="frame-line">发送帧 <code class="mono" id="eraseFrame">—</code></div>
       </section>
     </div>
   </div>
@@ -276,6 +276,15 @@
         </span>
       </div>
     </div>
+  </section>
+
+  <!-- ============ 收发日志（整行宽度，置底） ============ -->
+  <section class="card" style="margin-top:18px;">
+    <div class="card-title">
+      <span>收发日志</span>
+      <button class="btn btn-sm" id="btnClearLog" type="button">清空</button>
+    </div>
+    <div class="log-box" id="logBox"></div>
   </section>
 
   <footer class="page-foot">
