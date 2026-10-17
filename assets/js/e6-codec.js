@@ -276,30 +276,22 @@
   }
 
   /**
-   * 上下翻转：面板装反了（屏上画面相对原图上下颠倒）时用来把数据摆正。
-   * 纯像素重排，不经过 canvas 旋转，避免半像素采样带来的毛边；
-   * 尺寸、通道数都不变，(x, y) → (x, h-1-y)，左右方向不动。
-   * @param {ImageData} imageData 任意尺寸的源数据
-   * @returns {ImageData} 翻转后的新数据（不修改入参）
+   * 上下翻转一组色号（打包前的最后一步）：面板装反了——屏上画面相对原图上下颠倒。
+   * 只换行不换列，(x, y) → (x, h-1-y)，左右方向不动。
+   * 作用在量化结果上，所以预览 / 抖动都保持正常方向，翻转只影响导出的数据。
+   * @param {Uint8Array|number[]} ids 行优先的色号数组（长度 = w*h）
+   * @param {number} w 宽
+   * @param {number} h 高
+   * @returns {Uint8Array} 翻转后的新数组（不修改入参）
    */
-  function flipV(imageData) {
-    const w = imageData.width;
-    const h = imageData.height;
-    const src = imageData.data;
-    const out = new Uint8ClampedArray(src.length);
+  function flipVIds(ids, w, h) {
+    const out = new Uint8Array(ids.length);
     for (let y = 0; y < h; y++) {
       const srcRow = (h - 1 - y) * w; // 倒着取行：上下翻转
       const dstRow = y * w;
-      for (let x = 0; x < w; x++) {
-        const si = (srcRow + x) * 4; // 列不变
-        const di = (dstRow + x) * 4;
-        out[di] = src[si];
-        out[di + 1] = src[si + 1];
-        out[di + 2] = src[si + 2];
-        out[di + 3] = src[si + 3];
-      }
+      for (let x = 0; x < w; x++) out[dstRow + x] = ids[srcRow + x]; // 列不变
     }
-    return new ImageData(out, w, h);
+    return out;
   }
 
   /** 调色板索引数组 → 可直接绘制/导出的 ImageData */
@@ -423,7 +415,7 @@
     drawFitted,
     preprocess,
     dither,
-    flipV,
+    flipVIds,
     idsToImageData,
     pack,
     unpack,

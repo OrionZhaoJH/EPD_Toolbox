@@ -3,7 +3,8 @@
    --------------------------------------------------------------------------
    依赖：assets/js/e6-codec.js（E6Codec）
    要点：「上下翻转」勾选框默认开启——面板装反了，屏上画面相对原图上下颠倒，
-   所以只在算数据时（dither 之前）用 Codec.flipV() 把源图上下翻一次，预览始终是正常方向
+   但预览（原图 / 抖动结果）都保持正常方向，只在打包输出数据时用 Codec.flipVIds()
+   把色号上下翻一次，所以导出的 .bin / .h、复制的 hex、送图发的字节才是翻转后的
    （见 docs/conventions.md §12；补偿放页面层，别写死进 codec 的 pack()）。
    ========================================================================== */
 (function () {
@@ -274,14 +275,14 @@
   el.serpentine.addEventListener('change', scheduleAuto);
   el.fitMode.addEventListener('change', scheduleAuto);
 
-  // 面板装反了：屏上画面相对原图上下颠倒，所以默认勾选，算数据前把源图上下翻一次。
-  // 只影响导出的数据，预览保持正常方向；勾掉可以对比方向，同样自动重算
+  // 面板装反了：屏上画面相对原图上下颠倒，所以默认勾选，打包输出时把色号上下翻一次。
+  // 预览和抖动都按正常方向，勾掉可以对比方向，同样自动重算
   el.flipV.addEventListener('change', () => {
     log(
       'sys',
       el.flipV.checked
-        ? '已开启上下翻转：导出数据前把源图上下翻一次（预览不受影响）'
-        : '已关闭上下翻转：按原图方向算数据'
+        ? '已开启上下翻转：输出 / 发送的数据上下翻一次（预览与抖动结果不受影响）'
+        : '已关闭上下翻转：输出数据按正常方向'
     );
     scheduleAuto();
   });
@@ -354,22 +355,22 @@
     setTimeout(() => {
       const t0 = performance.now();
       try {
-        // 预览始终按正常方向画（看到的和原图一致）；只有算数据时才按面板方向上下翻转，
-        // 所以 state.srcImageData 存未翻转的图，zoom 重绘也不会跟着变
+        // 原图预览、抖动结果预览都按正常方向（用户看到的就是自己选的图）；
+        // 翻转只发生在「输出数据」这一步：先对正常方向的图抖动，再把色号上下翻一次，最后打包
         const drawn = Codec.drawFitted(state.image, w, h, el.fitMode.value, '#ffffff');
-        const data = el.flipV.checked ? Codec.flipV(drawn) : drawn;
         state.srcImageData = drawn;
         renderSource(drawn, w, h);
 
-        const res = Codec.dither(data, {
+        const res = Codec.dither(drawn, {
           algo: el.algo.value,
           brightness: parseInt(el.brightness.value, 10),
           contrast: parseInt(el.contrast.value, 10),
           strength: parseInt(el.strength.value, 10) / 100,
           serpentine: el.serpentine.checked,
         });
-        const bytes = Codec.pack(res.ids, w, h);
-        state.result = { ids: res.ids, bytes, imageData: res.imageData, width: w, height: h };
+        const outIds = el.flipV.checked ? Codec.flipVIds(res.ids, w, h) : res.ids;
+        const bytes = Codec.pack(outIds, w, h);
+        state.result = { ids: outIds, bytes, imageData: res.imageData, width: w, height: h };
 
         renderResult(res.imageData);
         renderStats(res.stats);

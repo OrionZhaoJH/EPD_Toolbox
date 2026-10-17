@@ -177,35 +177,28 @@ ok(C.frameBytes(480, 719) === 480 * 360, '奇数高度向上取整');
   ok(same, '480×720 往返一致');
 }
 
-/* 7. 上下翻转（只翻上下，左右不动） */
+/* 7. 上下翻转色号（只翻上下，左右不动） */
 {
   const w = 3;
   const h = 2;
-  const img = new FakeImageData(w, h);
-  // 每像素的 R 通道就是它的序号，方便核对位置：3×2 → 第一行 0 1 2，第二行 3 4 5
-  for (let p = 0; p < w * h; p++) {
-    img.data[p * 4] = p;
-    img.data[p * 4 + 3] = 255;
-  }
-  const flipped = C.flipV(img);
-  const at = (d, x, y) => d.data[(y * w + x) * 4];
-  let pass = flipped.width === w && flipped.height === h;
-  // 第一行变成原来的第二行：3 4 5；第二行变成原来的第一行：0 1 2
-  pass = pass && at(flipped, 0, 0) === 3 && at(flipped, 1, 0) === 4 && at(flipped, 2, 0) === 5;
-  pass = pass && at(flipped, 0, 1) === 0 && at(flipped, 1, 1) === 1 && at(flipped, 2, 1) === 2;
-  ok(pass, 'flipV：上下颠倒，尺寸不变');
-  // 左右不能动：同一列的上下两行对应关系固定
+  // 行优先的色号：第一行 0 1 2，第二行 3 4 5
+  const ids = [0, 1, 2, 3, 4, 5];
+  const flipped = C.flipVIds(ids, w, h);
+  ok(flipped.length === w * h, 'flipVIds：长度不变');
+  // 第一行变成原来的第二行 3 4 5；第二行变成原来的第一行 0 1 2
+  ok(Array.from(flipped).join(',') === '3,4,5,0,1,2', 'flipVIds：上下颠倒');
+  // 左右不能动：第 x 列在翻转前后元素相同，只是上下换了位置
   let colSame = true;
-  for (let x = 0; x < w; x++) if (at(flipped, x, 0) !== at(img, x, 1) || at(flipped, x, 1) !== at(img, x, 0)) colSame = false;
-  ok(colSame, 'flipV：左右方向不动（只换行，不换列）');
-  ok(at(img, 0, 0) === 0, 'flipV：不修改入参');
+  for (let x = 0; x < w; x++) {
+    if (flipped[x] !== ids[h * w - w + x] || flipped[w + x] !== ids[x]) colSame = false;
+  }
+  ok(colSame, 'flipVIds：左右方向不动（只换行，不换列）');
+  ok(ids.join(',') === '0,1,2,3,4,5', 'flipVIds：不修改入参');
 
-  const twice = C.flipV(flipped);
-  let same = true;
-  for (let i = 0; i < img.data.length; i++) if (img.data[i] !== twice.data[i]) { same = false; break; }
-  ok(same, 'flipV 两次回到原图');
+  const twice = C.flipVIds(flipped, w, h);
+  ok(Array.from(twice).join(',') === ids.join(','), 'flipVIds 两次回到原数组');
 
-  // 用四个不同颜色的小图核对打包结果：2×2 里黑/红在一列、白/蓝在一列
+  // 用四个不同颜色的小图核对：2×2 里黑/红在一列、白/蓝在一列
   const cw = 2;
   const ch = 2;
   const colors = [
@@ -221,12 +214,16 @@ ok(C.frameBytes(480, 719) === 480 * 360, '奇数高度向上取整');
     img2.data[p * 4 + 2] = b;
     img2.data[p * 4 + 3] = 255;
   });
-  const packOf = (im) => C.toHex(C.pack(C.dither(im, { algo: 'threshold' }).ids, cw, ch));
-  const before = packOf(img2);
-  const after = packOf(C.flipV(img2));
-  ok(before !== after, 'flipV 会真的改变打包结果（' + before + ' → ' + after + '）');
+  const idsOf = (im) => C.dither(im, { algo: 'threshold' }).ids;
+  const packOf = (list) => C.toHex(C.pack(list, cw, ch));
+  const normalIds = idsOf(img2);
+  const before = packOf(normalIds);
+  const after = packOf(C.flipVIds(normalIds, cw, ch));
+  ok(before !== after, 'flipVIds 会真的改变打包结果（' + before + ' → ' + after + '）');
   // 高半字节在上：上下互换 = 每列高低 nibble 互换，左右不动，所以 03 15 → 30 51
-  ok(after === '30 51', 'flipV 只交换每列的高/低半字节（' + after + '）');
+  ok(after === '30 51', 'flipVIds 只交换每列的高/低半字节（' + after + '）');
+  // 抖动结果本身不能被动：ids 还是正常方向的
+  ok(packOf(normalIds) === before, 'flipVIds：抖动结果保持正常方向');
 }
 
 /* 8. 内置自检 */
