@@ -55,6 +55,7 @@
 
   let selectedColor = 0; // 默认黑
   let busy = false; // 同一时刻只跑一条命令，避免响应互相顶掉
+  let locked = false; // 有命令在执行：所有命令卡片禁用，直到完成/超时/出错
 
   /* 长命令（刷屏可能几十秒）的进度：每 200ms 刷一次徽章，显示耗时与心跳次数 */
   let ticker = null;
@@ -175,13 +176,33 @@
     el.eraseFrame.textContent = BLE.hex(BLE.buildFrame(CMD.FLASH_ERASE, [Number(el.slotSelect.value) || 0]));
   }
 
+  /**
+   * 命令互斥的唯一入口：命令控件是否可用 = 已连接 && 未锁定。
+   * 任何新增的命令按钮/下拉都必须挂到这里，否则会绕过互斥（见 docs/conventions.md）。
+   */
+  function applyCommandEnabled() {
+    const usable = !!client.connected && !locked;
+    el.btnRev.disabled = !usable;
+    el.btnErase.disabled = !usable;
+    el.slotSelect.disabled = !usable;
+    Array.from(el.colorGrid.children).forEach((btn) => (btn.disabled = !usable));
+  }
+
+  /**
+   * 执行中锁定所有命令卡片（读版本 / 刷纯色 / 擦除，含各自的参数控件），
+   * 只有命令完成、超时或出错时才解锁；断开连接会顺带清锁。
+   */
+  function setCommandLock(value) {
+    locked = value;
+    applyCommandEnabled();
+  }
+
   function setConnected(on) {
     el.btnConnect.disabled = on;
     el.btnDisconnect.disabled = !on;
-    el.btnRev.disabled = !on;
-    el.btnErase.disabled = !on;
-    Array.from(el.colorGrid.children).forEach((btn) => (btn.disabled = !on));
     [el.nameFilter, el.uuidService, el.uuidWrite, el.uuidNotify].forEach((input) => (input.disabled = on));
+    if (!on) locked = false; // 断开时清锁，避免重连后一直锁着
+    applyCommandEnabled();
   }
 
   /* ---------------- BLE ---------------- */
@@ -231,6 +252,7 @@
   el.btnRev.addEventListener('click', async () => {
     if (busy) return log('sys', '上一条命令还在执行，稍等');
     busy = true;
+    setCommandLock(true);
     setCmdState(el.revState, 'running', '执行中…');
     const t0 = performance.now();
     try {
@@ -250,6 +272,7 @@
       log('err', '读版本失败：' + err.message);
     } finally {
       busy = false;
+      setCommandLock(false); // 成功 / 失败 / 超时都解禁
     }
   });
 
@@ -263,6 +286,7 @@
 
     const color = Codec.PALETTE.find((c) => c.id === id);
     busy = true;
+    setCommandLock(true);
     startProgress(el.colorState, '刷屏中');
     const t0 = performance.now();
     try {
@@ -280,6 +304,7 @@
       log('err', '刷纯色失败：' + err.message);
     } finally {
       busy = false;
+      setCommandLock(false);
     }
   });
 
@@ -292,6 +317,7 @@
       return;
     }
     busy = true;
+    setCommandLock(true);
     startProgress(el.eraseState, '擦除中');
     const t0 = performance.now();
     try {
@@ -309,6 +335,7 @@
       log('err', '擦除槽 ' + slot + ' 失败：' + err.message);
     } finally {
       busy = false;
+      setCommandLock(false);
     }
   });
 
