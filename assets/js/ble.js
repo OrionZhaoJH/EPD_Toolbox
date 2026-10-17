@@ -76,6 +76,34 @@
     idleTimeout: 20000,
   };
 
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /**
+   * 通用重试：GATT 操作偶发失败（典型是「GATT operation already in progress」）
+   * 或单片超时，重发同一帧通常就能过。协议级错误（err.retryable === false，
+   * 比如「无效数据」）不重试，重发也没意义。
+   *
+   * @param {(attempt:number)=>Promise<any>} run
+   * @param {number} attempts 总尝试次数，默认 3
+   * @param {(info:{attempt:number,error:Error})=>void} [onRetry]
+   */
+  async function withRetry(run, attempts, onRetry) {
+    const total = Math.max(1, attempts || 1);
+    let lastErr = null;
+    for (let attempt = 1; attempt <= total; attempt++) {
+      try {
+        return await run(attempt);
+      } catch (err) {
+        lastErr = err;
+        const retryable = !err || err.retryable !== false;
+        if (!retryable || attempt >= total) throw err;
+        if (onRetry) onRetry({ attempt, error: err });
+        await sleep(40 * attempt);
+      }
+    }
+    throw lastErr;
+  }
+
   /** 十六进制字符串 → 期望的 16 位 UUID 形式（蓝牙标准写法 0000xxxx-0000-1000-8000-00805f9b34fb 可省略） */
   function toUuid(v) {
     if (typeof v === 'number') return v;
@@ -368,8 +396,15 @@
             if (h.onHeartbeat) h.onHeartbeat(cmd, heartbeat);
             return;
           }
-          if (code === 0x00 || code === 0x02) finish(resolve, frame);
-          else finish(reject, new Error(client.responseText(code) + '（0x' + code.toString(16).toUpperCase() + '）'));
+          if (code === 0x00 || code === 0x02) {
+            finish(resolve, frame);
+            return;
+          }
+          // 协议级错误：只有 BUSY(0x03) 值得就地重发，其它（无效命令/数据）重试无意义
+          const err = new Error(client.responseText(code) + '（0x' + code.toString(16).toUpperCase() + '）');
+          err.responseCode = code;
+          err.retryable = code === 0x03;
+          finish(reject, err);
         };
 
         arm();
@@ -409,10 +444,15 @@
       return client.sendAndWait(CMD.UPDATE_COLOR, [colorId], idleMs || 20000);
     };
 
-    client.eraseSlot = function (imageId, idleMs) {
+    client.eraseSlot = function (imageId, opts) {
+      const o = opts || {};
       if (imageId < 0 || imageId > 10) return Promise.reject(new Error('图片槽只能是 0~10'));
-      // 擦除没有心跳，只能给一个更宽的空闲上限
-      return client.sendAndWait(CMD.FLASH_ERASE, [imageId], idleMs || 60000);
+      // 擦除没有心跳，只能给一个更宽的空闲上限；GATT 偶发错误按 attempts 重发
+      return withRetry(
+        () => client.sendAndWait(CMD.FLASH_ERASE, [imageId], o.idleMs || 60000),
+        o.attempts || 3,
+        o.onRetry
+      );
     };
 
     /**
@@ -420,14 +460,19 @@
      * 每片 233 字节（帧 244），offset 从 0 递增，写完一片必须等到该片的 DONE 再发下一片
      * —— 天然流控，避免固件忙时回 BUSY 丢片。
      *
+     * 单片的失败（典型是「GATT operation already in progress」或该片超时）会重发，
+     * 默认最多试 3 次；协议级错误（如「无效数据」）不重试，直接失败。
+     *
      * 调用前必须先 0x20 擦除同一个槽并确认成功（由页面负责编排）。
      *
      * @param {number} imageId 0~10
      * @param {Uint8Array} bytes 4bpp 图像数据，长度应为 172800
      * @param {object} [opts]
      *   onProgress({index,count,offset,sent,total})  每片发出前回调
+     *   onRetry({index,attempt,error})  某一片重发前回调
      *   shouldStop()  返回 true 则在下一片前中止
      *   idleMs  单片的空闲超时，默认 5000
+     *   attempts 单片最多尝试次数，默认 3
      * @returns {Promise<{chunks:number, bytes:number}>}
      */
     client.writeImage = async function (imageId, bytes, opts) {
@@ -437,6 +482,7 @@
         throw new Error('图片数据必须是 ' + IMAGE_BYTES + ' 字节（480×720 4bpp），当前 ' + (bytes ? bytes.length : 0));
       }
       const count = Math.ceil(bytes.length / CHUNK_PAYLOAD);
+      const attempts = o.attempts || 3;
       const silent = client.silentCmd;
       client.silentCmd = CMD.WRITE_IMAGE; // 742 片不逐条写日志
       try {
@@ -446,7 +492,11 @@
           const payload = bytes.subarray(offset, Math.min(offset + CHUNK_PAYLOAD, bytes.length));
           const frame = buildImageChunkFrame(imageId, offset, payload);
           if (o.onProgress) o.onProgress({ index: i, count, offset, sent: offset + payload.length, total: bytes.length });
-          await client.sendFrameAndWait(frame, CMD.WRITE_IMAGE, o.idleMs || 5000, { quiet: true });
+          await withRetry(
+            () => client.sendFrameAndWait(frame, CMD.WRITE_IMAGE, o.idleMs || 5000, { quiet: true }),
+            attempts,
+            (info) => o.onRetry && o.onRetry({ index: i, attempt: info.attempt, error: info.error })
+          );
         }
       } finally {
         client.silentCmd = silent;

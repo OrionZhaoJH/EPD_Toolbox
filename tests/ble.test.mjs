@@ -244,6 +244,66 @@ console.log('BLE 组帧与解析自测');
   ok(!bad.ok && /172800/.test(bad.msg), '长度不对时直接拒绝，不发出任何帧');
 }
 
+/* 13. 瞬时写失败（GATT operation already in progress）→ 同一片重发成功 */
+{
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  let writes = 0;
+  let retries = 0;
+  client.writeChar = {
+    writeValue: async () => {
+      writes++;
+      if (writes === 1) throw new Error('GATT operation already in progress.');
+      handlers.onFrame({ cmd: 0x30, code: 0x02, data: new Uint8Array([2]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x30, 2, 0, 0x0d]) });
+    },
+  };
+  const res = await client.writeImage(0, new Uint8Array(B.IMAGE_BYTES), { onRetry: () => retries++ });
+  ok(res.chunks === 742 && writes === 743, '首片写失败后退避重发，总写入 743 次（742 片 + 1 次重试）');
+  ok(retries === 1, 'onRetry 上报 1 次');
+}
+
+/* 14. BUSY(0x03) 重试，协议错误(0xE7) 不重试 */
+{
+  const make = () => {
+    const handlers = { onLog() {}, onStatus() {}, onFrame() {} };
+    const client = B.create(handlers);
+    client.connected = true;
+    return { client, handlers };
+  };
+
+  {
+    const { client, handlers } = make();
+    let n = 0;
+    client.writeChar = {
+      writeValue: async () => {
+        n++;
+        const code = n === 1 ? 0x03 : 0x02;
+        handlers.onFrame({ cmd: 0x30, code, data: new Uint8Array([code]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x30, code, 0, 0x0d]) });
+      },
+    };
+    const res = await client.writeImage(0, new Uint8Array(B.IMAGE_BYTES));
+    ok(res.chunks === 742 && n === 743, '设备回 BUSY 后重发同一片，最终写完');
+  }
+
+  {
+    const { client, handlers } = make();
+    let n = 0;
+    client.writeChar = {
+      writeValue: async () => {
+        n++;
+        handlers.onFrame({ cmd: 0x30, code: 0xe7, data: new Uint8Array([0xe7]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x30, 0xe7, 0, 0x0d]) });
+      },
+    };
+    const bad = await client.writeImage(0, new Uint8Array(B.IMAGE_BYTES)).then(
+      () => ({ ok: true }),
+      (e) => ({ ok: false, msg: e.message })
+    );
+    ok(!bad.ok && /无效数据/.test(bad.msg), '协议错误直接失败');
+    ok(n === 1, '协议错误不重试（只写了 1 次）');
+  }
+}
+
 if (fail.length) {
   console.error('\n失败 ' + fail.length + ' 项');
   process.exit(1);
