@@ -2,6 +2,9 @@
    E6 图像转换页的交互逻辑
    --------------------------------------------------------------------------
    依赖：assets/js/e6-codec.js（E6Codec）
+   要点：「上下左右翻转」勾选框默认开启——屏幕实际是上下 + 左右各翻一次显示，
+   所以在 drawFitted() 之后、dither() 之前先用 Codec.flip180() 把源图转回来
+   （见 docs/conventions.md §12；补偿放页面层，别写死进 codec 的 pack()）。
    ========================================================================== */
 (function () {
   'use strict';
@@ -32,6 +35,7 @@
     bytesPreview: $('bytesPreview'),
     algo: $('algo'),
     serpentine: $('serpentine'),
+    flip180: $('flip180'),
     brightness: $('brightness'),
     contrast: $('contrast'),
     strength: $('strength'),
@@ -42,6 +46,7 @@
     btnReset: $('btnReset'),
     convertState: $('convertState'),
     srcWrap: $('srcWrap'),
+    srcLabel: $('srcLabel'),
     outWrap: $('outWrap'),
     zoomSeg: $('zoomSeg'),
     colorStats: $('colorStats'),
@@ -269,6 +274,17 @@
   el.serpentine.addEventListener('change', scheduleAuto);
   el.fitMode.addEventListener('change', scheduleAuto);
 
+  // 屏幕上下 + 左右各翻一次显示，所以默认勾选；勾掉可以对比方向，同样自动重算
+  el.flip180.addEventListener('change', () => {
+    log(
+      'sys',
+      el.flip180.checked
+        ? '已开启上下左右翻转：算数据前把源图旋转 180°（屏幕实际显示方向就是正的）'
+        : '已关闭上下左右翻转：按原图方向算数据'
+    );
+    scheduleAuto();
+  });
+
   [el.brightness, el.contrast, el.strength].forEach((input) => {
     input.addEventListener('input', () => {
       el.brightnessVal.textContent = el.brightness.value;
@@ -309,6 +325,7 @@
     el.algo.value = 'floydSteinberg';
     el.fitMode.value = 'contain';
     el.serpentine.checked = true;
+    el.flip180.checked = true;
     el.sizePreset.value = '480x720';
     el.imgW.value = '480';
     el.imgH.value = '720';
@@ -336,8 +353,13 @@
     setTimeout(() => {
       const t0 = performance.now();
       try {
-        const src = Codec.drawFitted(state.image, w, h, el.fitMode.value, '#ffffff');
+        // 屏幕是上下 + 左右各翻一次显示（合计旋转 180°），所以默认勾选时先把源图转回来，
+        // 后面的抖动 / 打包 / 预览全在这个方向上算；勾掉就按原图方向算，用于对比
+        const drawn = Codec.drawFitted(state.image, w, h, el.fitMode.value, '#ffffff');
+        const flip = el.flip180.checked;
+        const src = flip ? Codec.flip180(drawn) : drawn;
         state.srcImageData = src;
+        el.srcLabel.textContent = flip ? '原图（已上下左右翻转 · 面板方向）' : '原图（按目标尺寸绘制）';
         renderSource(src, w, h);
 
         const res = Codec.dither(src, {

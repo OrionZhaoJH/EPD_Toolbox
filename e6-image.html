@@ -106,6 +106,15 @@
               <label for="serpentine" style="cursor:pointer;">蛇形扫描</label>
             </div>
           </div>
+          <!-- 屏幕实际是上下 + 左右各翻一次（= 旋转 180°）显示，所以默认在算数据前把源图转回来；
+               勾选状态只影响计算，不改原图文件，去掉勾选可对比两种方向 -->
+          <div class="form-group" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <div class="check-row">
+              <input type="checkbox" id="flip180" checked>
+              <label for="flip180" style="cursor:pointer;">上下左右翻转</label>
+            </div>
+          </div>
         </div>
 
         <div class="form-row" style="margin-top:12px;">
@@ -176,7 +185,7 @@
           </span>
         </div>
 
-        <div class="preview-label">原图（按目标尺寸绘制）</div>
+        <div class="preview-label" id="srcLabel">原图（按目标尺寸绘制）</div>
         <div class="preview-wrap" id="srcWrap">
           <div class="preview-empty">选择图片后显示</div>
         </div>
