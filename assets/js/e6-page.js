@@ -2,8 +2,8 @@
    E6 图像转换页的交互逻辑
    --------------------------------------------------------------------------
    依赖：assets/js/e6-codec.js（E6Codec）
-   要点：「上下左右翻转」勾选框默认开启——屏幕实际是上下 + 左右各翻一次显示，
-   所以在 drawFitted() 之后、dither() 之前先用 Codec.flip180() 把源图转回来
+   要点：「上下翻转」勾选框默认开启——面板装反了，屏上画面相对原图上下颠倒，
+   所以只在算数据时（dither 之前）用 Codec.flipV() 把源图上下翻一次，预览始终是正常方向
    （见 docs/conventions.md §12；补偿放页面层，别写死进 codec 的 pack()）。
    ========================================================================== */
 (function () {
@@ -35,7 +35,7 @@
     bytesPreview: $('bytesPreview'),
     algo: $('algo'),
     serpentine: $('serpentine'),
-    flip180: $('flip180'),
+    flipV: $('flipV'),
     brightness: $('brightness'),
     contrast: $('contrast'),
     strength: $('strength'),
@@ -46,7 +46,6 @@
     btnReset: $('btnReset'),
     convertState: $('convertState'),
     srcWrap: $('srcWrap'),
-    srcLabel: $('srcLabel'),
     outWrap: $('outWrap'),
     zoomSeg: $('zoomSeg'),
     colorStats: $('colorStats'),
@@ -274,13 +273,14 @@
   el.serpentine.addEventListener('change', scheduleAuto);
   el.fitMode.addEventListener('change', scheduleAuto);
 
-  // 屏幕上下 + 左右各翻一次显示，所以默认勾选；勾掉可以对比方向，同样自动重算
-  el.flip180.addEventListener('change', () => {
+  // 面板装反了：屏上画面相对原图上下颠倒，所以默认勾选，算数据前把源图上下翻一次。
+  // 只影响导出的数据，预览保持正常方向；勾掉可以对比方向，同样自动重算
+  el.flipV.addEventListener('change', () => {
     log(
       'sys',
-      el.flip180.checked
-        ? '已开启上下左右翻转：算数据前把源图旋转 180°（屏幕实际显示方向就是正的）'
-        : '已关闭上下左右翻转：按原图方向算数据'
+      el.flipV.checked
+        ? '已开启上下翻转：导出数据前把源图上下翻一次（预览不受影响）'
+        : '已关闭上下翻转：按原图方向算数据'
     );
     scheduleAuto();
   });
@@ -325,7 +325,7 @@
     el.algo.value = 'floydSteinberg';
     el.fitMode.value = 'contain';
     el.serpentine.checked = true;
-    el.flip180.checked = true;
+    el.flipV.checked = true;
     el.sizePreset.value = '480x720';
     el.imgW.value = '480';
     el.imgH.value = '720';
@@ -353,16 +353,14 @@
     setTimeout(() => {
       const t0 = performance.now();
       try {
-        // 屏幕是上下 + 左右各翻一次显示（合计旋转 180°），所以默认勾选时先把源图转回来，
-        // 后面的抖动 / 打包 / 预览全在这个方向上算；勾掉就按原图方向算，用于对比
+        // 预览始终按正常方向画（看到的和原图一致）；只有算数据时才按面板方向上下翻转，
+        // 所以 state.srcImageData 存未翻转的图，zoom 重绘也不会跟着变
         const drawn = Codec.drawFitted(state.image, w, h, el.fitMode.value, '#ffffff');
-        const flip = el.flip180.checked;
-        const src = flip ? Codec.flip180(drawn) : drawn;
-        state.srcImageData = src;
-        el.srcLabel.textContent = flip ? '原图（已上下左右翻转 · 面板方向）' : '原图（按目标尺寸绘制）';
-        renderSource(src, w, h);
+        const data = el.flipV.checked ? Codec.flipV(drawn) : drawn;
+        state.srcImageData = drawn;
+        renderSource(drawn, w, h);
 
-        const res = Codec.dither(src, {
+        const res = Codec.dither(data, {
           algo: el.algo.value,
           brightness: parseInt(el.brightness.value, 10),
           contrast: parseInt(el.contrast.value, 10),
