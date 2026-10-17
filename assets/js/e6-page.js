@@ -119,6 +119,7 @@
         btn.style.background = item.hex;
       } else {
         btn.style.background = 'repeating-linear-gradient(45deg,#94a3b8 0 6px,#e2e8f0 6px 12px)';
+        btn.dataset.reserved = '1';
       }
       btn.disabled = true;
       el.swatchGrid.appendChild(btn);
@@ -435,7 +436,10 @@
   function setDeviceControlsEnabled(on) {
     el.btnReadRev.disabled = !on;
     el.btnErase.disabled = !on;
-    Array.from(el.swatchGrid.children).forEach((b) => (b.disabled = !on));
+    Array.from(el.swatchGrid.children).forEach((b) => {
+      // 4 / 7 是保留编号，固件虽然接受 0~7，但面板上没有对应颜色，不开放点击
+      b.disabled = !on || b.dataset.reserved === '1';
+    });
     el.btnUpload.disabled = true; // 固件未提供写图命令，始终不可用
   }
 
