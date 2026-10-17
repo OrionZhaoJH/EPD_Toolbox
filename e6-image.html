@@ -12,21 +12,16 @@
 <body>
 <div class="container">
 
-  <!-- 吸顶工具条：左返回 + 标题，右连接控制 -->
+  <!-- 吸顶工具条：左返回 + 标题，右跳转命令测试页 -->
   <div class="topbar" id="topbar">
     <div class="topbar-left">
       <a href="./index.html" class="nav-back">← 工具箱</a>
       <span class="topbar-title"><span class="icon">🖼️</span> E6 六色图像转换</span>
     </div>
     <div class="topbar-right">
-      <!-- 滚动后顶栏才出现连接状态，避免与下方状态行重复 -->
-      <span class="badge off" id="bleStatusTop"><span id="bleStatusTopText">未连接</span></span>
-      <button class="btn btn-primary btn-sm" id="btnConnect" type="button" title="连接 BLE 设备">
-        <span class="btn-ico">🔗</span><span class="btn-label">连接 BLE</span>
-      </button>
-      <button class="btn btn-danger btn-sm" id="btnDisconnect" type="button" disabled title="断开连接">
-        <span class="btn-ico">⏏️</span><span class="btn-label">断开</span>
-      </button>
+      <a class="btn btn-sm" href="./ble-console.html" title="BLE 命令测试">
+        <span class="btn-ico">📶</span><span class="btn-label">命令测试</span>
+      </a>
     </div>
   </div>
 
@@ -34,35 +29,10 @@
     <h1><span class="icon">🖼️</span> E6 六色图像转换</h1>
     <p>
       选择图片 → 抖动量化为黑白黄红蓝绿 6 色 → 生成 4bpp 面板数据（列优先、高半字节在上）。
-      可以导出 <code>.bin</code> / C 数组，也可以连接设备后直接下发刷屏命令。
+      可导出 <code>.bin</code> / C 数组；设备命令（读版本、刷纯色、擦除槽）集中在
+      <a href="./ble-console.html">BLE 命令测试</a>页。
     </p>
   </header>
-
-  <div class="notice error" id="bleWarn" hidden>
-    ⚠️ 当前浏览器不支持 Web Bluetooth API，图片处理仍可用，但无法连接设备。请使用 Chrome / Edge（HTTPS 或 localhost 访问）。
-  </div>
-
-  <!-- 连接设置行 -->
-  <div class="row" style="margin-bottom:16px; align-items:flex-end;">
-    <div class="form-group" style="flex:0 1 220px;">
-      <label for="nameFilter">设备名称前缀</label>
-      <input type="text" id="nameFilter" placeholder="留空则列出全部设备" value="EPD" autocomplete="off">
-    </div>
-    <div class="form-group" style="flex:0 0 auto;">
-      <label>连接状态</label>
-      <div class="control-line">
-        <span class="badge off" id="bleStatus"><span id="bleStatusText">未连接</span></span>
-        <span class="kv" id="bleDeviceName"></span>
-      </div>
-    </div>
-    <span class="spacer"></span>
-    <div class="form-group" style="flex:0 0 auto;">
-      <label>&nbsp;</label>
-      <div class="control-line">
-        <span class="hint">帧格式 <code>55 AA … 0D</code>，服务 <code>FFE0</code></span>
-      </div>
-    </div>
-  </div>
 
   <div class="grid-2">
     <!-- ================= 左侧：输入 + 输出 ================= -->
@@ -174,10 +144,16 @@
           <button class="btn btn-sm" id="btnCopyHex" type="button" disabled>⧉ 复制 hex</button>
         </div>
         <textarea class="code-box" id="hexOut" readonly placeholder="转换后这里显示前 128 字节的十六进制…"></textarea>
+
+        <div class="hint" style="margin-top:10px;">
+          图像写入 Flash 需要固件补一条写图命令（当前只有 <code>0x00 / 0x10 / 0x20</code>），
+          现阶段请导出 <code>.bin</code>；刷屏相关命令可以到
+          <a href="./ble-console.html">BLE 命令测试</a>页逐条下发。
+        </div>
       </section>
     </div>
 
-    <!-- ================= 右侧：预览 + 设备 ================= -->
+    <!-- ================= 右侧：预览 + 日志 ================= -->
     <div class="col">
 
       <section class="card">
@@ -202,41 +178,9 @@
         </div>
       </section>
 
-      <section class="card" id="device">
-        <div class="card-title">
-          <span>4 · 设备控制</span>
-          <span class="sub">CH592F / FFE0</span>
-        </div>
-
-        <label>刷纯色</label>
-        <div class="swatch-grid swatch-row" id="swatchGrid"></div>
-
-        <div class="divider"></div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label for="slotSelect">图片槽（擦除用）</label>
-            <select id="slotSelect"></select>
-          </div>
-          <div class="form-group" style="flex:0 0 auto;justify-content:flex-end;">
-            <label>&nbsp;</label>
-            <button class="btn btn-sm" id="btnErase" type="button" disabled>擦除该槽</button>
-          </div>
-        </div>
-
-        <div class="row" style="margin-top:12px;">
-          <button class="btn btn-sm" id="btnReadRev" type="button" disabled>读取 IC 版本</button>
-          <button class="btn btn-sm" id="btnUpload" type="button" disabled title="固件暂未实现写图命令">⬆ 上传图像</button>
-        </div>
-        <div class="hint" style="margin-top:8px;">
-          图像传输需要固件提供写 Flash 命令（当前固件只有 <code>0x00 / 0x10 / 0x20</code>），
-          所以「上传图像」暂不可用：请先导出 <code>.bin</code>，固件补齐后再开放。
-        </div>
-      </section>
-
       <section class="card">
         <div class="card-title">
-          <span>5 · 日志</span>
+          <span>4 · 日志</span>
           <button class="btn btn-sm" id="btnClearLog" type="button">清空</button>
         </div>
         <div class="log-box" id="logBox"></div>
@@ -247,12 +191,12 @@
   <footer class="page-foot">
     <span>EPD Toolbox · E6 六色</span>
     <a href="./index.html">返回工具箱</a>
+    <a href="./ble-console.html">BLE 命令测试</a>
     <a href="./index.html#format">数据格式速查</a>
   </footer>
 </div>
 
 <script src="assets/js/e6-codec.js"></script>
-<script src="assets/js/ble.js"></script>
 <script src="assets/js/e6-page.js"></script>
 </body>
 </html>

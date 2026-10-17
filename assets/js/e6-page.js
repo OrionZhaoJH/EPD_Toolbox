@@ -1,7 +1,7 @@
 /* ==========================================================================
    E6 图像转换页的交互逻辑
    --------------------------------------------------------------------------
-   依赖：assets/js/e6-codec.js（E6Codec）、assets/js/ble.js（EPDBLE）
+   依赖：assets/js/e6-codec.js（E6Codec）
    ========================================================================== */
 (function () {
   'use strict';
@@ -52,20 +52,6 @@
     btnExportC: $('btnExportC'),
     btnCopyHex: $('btnCopyHex'),
     hexOut: $('hexOut'),
-    bleWarn: $('bleWarn'),
-    bleStatus: $('bleStatus'),
-    bleStatusText: $('bleStatusText'),
-    bleStatusTop: $('bleStatusTop'),
-    bleStatusTopText: $('bleStatusTopText'),
-    bleDeviceName: $('bleDeviceName'),
-    nameFilter: $('nameFilter'),
-    btnConnect: $('btnConnect'),
-    btnDisconnect: $('btnDisconnect'),
-    swatchGrid: $('swatchGrid'),
-    slotSelect: $('slotSelect'),
-    btnErase: $('btnErase'),
-    btnReadRev: $('btnReadRev'),
-    btnUpload: $('btnUpload'),
     logBox: $('logBox'),
     btnClearLog: $('btnClearLog'),
   };
@@ -98,35 +84,6 @@
       el.algo.appendChild(opt);
     });
     el.algo.value = 'floydSteinberg';
-
-    for (let i = 0; i <= 10; i++) {
-      const opt = document.createElement('option');
-      opt.value = String(i);
-      opt.textContent = '槽 ' + i;
-      el.slotSelect.appendChild(opt);
-    }
-
-    // 刷纯色色块：6 个有效颜色 + 2 个保留位
-    const ids = [0, 1, 2, 3, 5, 6];
-    const reserved = [4, 7];
-    ids.concat(reserved).forEach((id) => {
-      const item = Codec.PALETTE.find((c) => c.id === id);
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'swatch';
-      btn.dataset.label = item ? item.name : 'ID ' + id;
-      btn.dataset.colorId = String(id);
-      btn.title = item ? '刷' + item.name + '（color_id=' + id + '）' : '保留值 ' + id;
-      if (item) {
-        btn.style.background = item.hex;
-      } else {
-        btn.style.background = 'repeating-linear-gradient(45deg,#94a3b8 0 6px,#e2e8f0 6px 12px)';
-        btn.dataset.reserved = '1';
-      }
-      btn.disabled = true;
-      el.swatchGrid.appendChild(btn);
-    });
-
     updateSizeHint();
   }
 
@@ -413,116 +370,7 @@
     }
   });
 
-  /* ---------------- BLE ---------------- */
-
-  /**
-   * 同步两处连接状态徽章（页面状态行 + 滚动后的顶栏）。
-   * 徽章只显示三态短文案，设备名单独放在右侧的 #bleDeviceName，
-   * 完整过程文字（正在选择设备/发现服务…）放进 title 悬浮提示。
-   */
-  function setStatus(st, fullText) {
-    const connected = st === 'connected';
-    const label = connected ? '已连接' : st === 'connecting' ? '连接中…' : '未连接';
-    const cls = 'badge ' + (connected ? 'ok' : st === 'connecting' ? 'ready' : 'off');
-    [el.bleStatus, el.bleStatusTop].forEach((badge) => {
-      badge.className = cls;
-      badge.title = fullText || label;
-    });
-    el.bleStatusText.textContent = label;
-    el.bleStatusTopText.textContent = label;
-  }
-
-  const ble = window.EPDBLE.create({
-    onLog: (type, text) => log(type, text),
-    onStatus: (st, text) => {
-      setStatus(st, text);
-      const connected = st === 'connected';
-      el.btnConnect.disabled = connected || st === 'connecting';
-      el.btnDisconnect.disabled = !connected;
-      el.bleDeviceName.textContent = connected && ble.device ? ble.device.name || '' : '';
-      setDeviceControlsEnabled(connected);
-    },
-    onFrame: (frame) => {
-      if (frame.cmd === window.EPDBLE.CMD.REVISION) {
-        const rev = Array.from(frame.data)
-          .map((b) => '0x' + b.toString(16).padStart(2, '0').toUpperCase())
-          .join(' ');
-        log('ok', 'IC 版本：' + rev);
-      }
-    },
-  });
-
-  function setDeviceControlsEnabled(on) {
-    el.btnReadRev.disabled = !on;
-    el.btnErase.disabled = !on;
-    Array.from(el.swatchGrid.children).forEach((b) => {
-      // 4 / 7 是保留编号，固件虽然接受 0~7，但面板上没有对应颜色，不开放点击
-      b.disabled = !on || b.dataset.reserved === '1';
-    });
-    el.btnUpload.disabled = true; // 固件未提供写图命令，始终不可用
-  }
-
-  if (!bledSupported()) {
-    el.bleWarn.hidden = false;
-    el.btnConnect.disabled = true;
-  }
-
-  function bledSupported() {
-    return !!navigator.bluetooth;
-  }
-
-  el.btnConnect.addEventListener('click', async () => {
-    try {
-      await ble.connect({ namePrefix: el.nameFilter.value.trim() });
-    } catch (err) {
-      if (err && err.name === 'NotFoundError') {
-        log('sys', '已取消设备选择');
-      } else {
-        log('err', '连接失败：' + (err && err.message ? err.message : err));
-      }
-      setStatus('idle');
-    }
-  });
-
-  el.btnDisconnect.addEventListener('click', () => ble.disconnect());
-
-  el.swatchGrid.addEventListener('click', async (e) => {
-    const btn = e.target.closest('button[data-color-id]');
-    if (!btn) return;
-    const id = parseInt(btn.dataset.colorId, 10);
-    const item = Codec.PALETTE.find((c) => c.id === id);
-    log('sys', '发送刷纯色：' + (item ? item.name : 'ID ' + id) + '（color_id=' + id + '）');
-    try {
-      await ble.updateColor(id);
-      log('ok', '刷纯色完成（color_id=' + id + '）');
-    } catch (err) {
-      log('err', '刷纯色失败：' + err.message);
-    }
-  });
-
-  el.btnReadRev.addEventListener('click', async () => {
-    try {
-      await ble.readRevision();
-      log('ok', '版本读取完成');
-    } catch (err) {
-      log('err', '读版本失败：' + err.message);
-    }
-  });
-
-  el.btnErase.addEventListener('click', async () => {
-    const slot = parseInt(el.slotSelect.value, 10);
-    try {
-      await ble.eraseSlot(slot);
-      log('ok', '槽 ' + slot + ' 擦除完成');
-    } catch (err) {
-      log('err', '擦除失败：' + err.message);
-    }
-  });
-
-  el.btnUpload.addEventListener('click', () => {
-    log('sys', '固件尚未实现写图命令（0x21），请先导出 .bin 或等固件补齐');
-  });
-
+  /* ---------------- 其它 ---------------- */
   el.btnClearLog.addEventListener('click', () => {
     el.logBox.innerHTML = '';
   });
@@ -538,7 +386,6 @@
   const test = Codec.selfTest();
   if (test.ok) log('ok', '编解码自检通过（4bpp 打包 / 反解一致）');
   else log('err', '编解码自检失败：' + test.reason);
-  if (!bledSupported()) log('sys', '当前浏览器不支持 Web Bluetooth，设备控制不可用');
 
   /* 演示模式：?demo=1 时生成一张测试图，方便没有素材时验证效果 */
   function loadDemo() {
