@@ -151,7 +151,7 @@ code, kbd, pre { font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monos
 /* 连接状态徽章里的设备名（e6-image.html / ble-console.html）：放在「已连接」左边，
    过长省略；窄屏只留状态词，避免徽章把连接按钮挤到第二行 */
 .badge-device { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-.badge-device:not(:empty)::after { content: ' · '; }
+.badge-device:not(:empty)::after { content: '·'; opacity: .6; } /* 间距交给 .badge 的 gap */
 @media (max-width: 640px) { .badge-device { display: none; } }
 
 @media (max-width: 640px) {
