@@ -98,8 +98,9 @@ try { await client.xxx(); } catch (e) { ... } finally { busy = false; setCommand
 
 ## 6. 状态显示
 
-- 徽章只显示三态短文案：未连接 / 连接中… / 已连接，设备名单独放在右侧，不重复；
-- 滚动后顶栏出现同一状态的徽章（`#bleStatusTop`），回到顶部自动隐藏；
+- 徽章只显示三态短文案：未连接 / 连接中… / 已连接；
+  设备名放在同一枚徽章内部、状态词左边（`.badge-device`），不再单独排一行；
+- 顶栏那一枚徽章就是唯一的状态显示，不做「滚动了才出现」的第二份（`#bleStatusTop` 已删除）；
 - 命令卡片各自带一个小状态徽章：未执行 / 执行中（带耗时、心跳数）/ 成功 / 失败。
 
 ## 7. 移动端
@@ -178,12 +179,18 @@ node tests/ble.test.mjs
   `0x20 → 0x30 → 0x11` 和「只送图不刷图屏上不会变」——这一步最容易漏，文案写清比事后解释便宜；
 - **连接 / 断开与连接状态徽章放顶部工具条，不塞进命令卡片**（和 `ble-console.html` 一致）：
   送图要几十秒，用户常常滚到下面看进度，连接入口跟着页面滚走就得来回找；
-  顶栏里依次是 `#bleState`（`#bleStateText`）、`#bleDeviceName`、`#btnConnect`、`#btnDisconnect`，
-  设备名用 `.topbar-device` 限宽省略、≤640px 隐藏，避免把按钮挤到第二行；
-- **设备名过滤输入框 `#nameFilter` 也放顶栏**（`#btnConnect` 左边、与连接按钮同一行）：
+  顶栏里依次是 `#bleState`（内含设备名 `#bleDeviceName` + 状态词 `#bleStateText`）、`#btnConnect`、`#btnDisconnect`；
+- **设备名放进状态徽章内部、在状态词左边**（`.badge-device`）：`已连接 · EPD-E6-01`
+  这类写法只占一处，比顶栏再排一个独立 `<span>` 更省宽度；设备名过长省略、≤640px 隐藏（只留状态词），
+  避免徽章把连接按钮挤到第二行；
+- **设备名过滤输入框 `#nameFilter` 放页面标题右侧**（`.page-head-row` + `.title-filter`，紧贴 `h1`）：
+  不占顶栏宽度（顶栏还要放徽章和两个按钮），标题常驻可见，也不会跟 `← 工具箱` 挤在一起；
   默认 `EPD`，留空则列出全部设备，连接时把值作为 `namePrefix` 传给 `client.connect()`；
   它只是过滤，不算命令控件，所以不进 `applyCommandEnabled()` 的互斥集合，
-  窄屏（≤640px）用 `.topbar-filter` 收起，退回「列出全部设备」；
+  窄屏（≤640px）用 `.title-filter { display: none; }` 收起，退回「列出全部设备」；
+  两个页面（`e6-image.html` / `ble-console.html`）用同一套 DOM 与类名，不要各自发挥；
+- `ble-console.html` 里不再单独用一张卡片放名称过滤框和连接状态：
+  连接按钮、状态徽章都已在顶栏，卡片只保留折叠的「高级：自定义服务 / 特征 UUID」；
 - 互斥、状态徽章、进度与中止沿用 §1 / §6 的同一套写法（`applyCommandEnabled()` /
   `setCommandLock()` / `setSendState()`），命令执行中除连接外的控件全部禁用。
 
