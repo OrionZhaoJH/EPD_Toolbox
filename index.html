@@ -49,8 +49,8 @@
     <a class="tool-card" href="ble-console.html">
       <div class="tool-icon">📶</div>
       <h3>BLE 命令测试 <span class="badge ready">可用</span></h3>
-      <p>独立测试页：0x00 读 IC 版本、0x10 刷纯色（六色可选）、0x20 擦除图片槽，实时查看帧收发与耗时。</p>
-      <div class="tool-meta"><span>CH592F</span><span>FFE3 / FFE4</span><span>Web Bluetooth</span></div>
+      <p>独立测试页：0x00 读 IC 版本、0x10 刷纯色（六色可选）、0x20 擦除图片槽、0x30 测试送图（六色棋盘），实时查看帧收发与耗时。</p>
+      <div class="tool-meta"><span>CH592F</span><span>FFE3 / FFE4</span><span>742 片送图</span></div>
     </a>
 
     <a class="tool-card" href="#format">
@@ -96,8 +96,8 @@
           <tbody>
             <tr><td class="mono">55 AA</td><td>2</td><td>帧头</td></tr>
             <tr><td class="mono">LEN_H LEN_L</td><td>2</td><td>整帧长度（含帧头帧尾）</td></tr>
-            <tr><td class="mono">CMD</td><td>1</td><td>0x00 读版本 / 0x10 刷纯色 / 0x20 擦除槽</td></tr>
-            <tr><td class="mono">DATA</td><td>n</td><td>命令参数，刷纯色时为颜色编号</td></tr>
+            <tr><td class="mono">CMD</td><td>1</td><td>0x00 读版本 / 0x10 刷纯色 / 0x20 擦除槽 / 0x30 写图片分片</td></tr>
+            <tr><td class="mono">DATA</td><td>n</td><td>命令参数；送图分片为 image_id + 3 字节大端 offset + 233 字节数据</td></tr>
             <tr><td class="mono">CRC</td><td>1</td><td>固件暂不校验，填 0x00</td></tr>
             <tr><td class="mono">0D</td><td>1</td><td>帧尾</td></tr>
           </tbody>
@@ -107,6 +107,8 @@
       <div class="hint">
         例：刷白色 → <code class="mono">55 AA 00 08 10 01 00 0D</code>；
         响应码 0x00 成功、0x01 受理中、0x02 完成、0x03 忙，0xE0 起为错误码。
+        送图分片固定 244 字节帧（<code class="mono">55 AA 00 F4 30 …</code>），
+        172800 字节共 742 片，最后一片缩短为 158 字节；需要 ATT MTU ≥ 247。
       </div>
     </section>
   </div>
