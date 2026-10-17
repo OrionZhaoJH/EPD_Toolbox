@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>E6 六色图像转换 · EPD Toolbox</title>
+<meta name="description" content="把任意图片抖动量化成 E6 六色（黑白黄红蓝绿），生成 480×720 4bpp 面板数据，支持导出 bin / C 数组并通过 BLE 控制设备刷屏。">
+<meta name="theme-color" content="#f5f7fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body>
+<div class="container">
+
+  <!-- 吸顶工具条：左返回 + 标题，右连接控制 -->
+  <div class="topbar" id="topbar">
+    <div class="topbar-left">
+      <a href="./index.html" class="nav-back">← 工具箱</a>
+      <span class="topbar-title"><span class="icon">🖼️</span> E6 六色图像转换</span>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-primary btn-sm" id="btnConnect" type="button">🔗 连接 BLE</button>
+      <button class="btn btn-danger btn-sm" id="btnDisconnect" type="button" disabled>⏏️ 断开</button>
+    </div>
+  </div>
+
+  <header class="page-head">
+    <h1><span class="icon">🖼️</span> E6 六色图像转换</h1>
+    <p>
+      选择图片 → 抖动量化为黑白黄红蓝绿 6 色 → 生成 4bpp 面板数据（列优先、高半字节在上）。
+      可以导出 <code>.bin</code> / C 数组，也可以连接设备后直接下发刷屏命令。
+    </p>
+  </header>
+
+  <div class="notice error" id="bleWarn" hidden>
+    ⚠️ 当前浏览器不支持 Web Bluetooth API，图片处理仍可用，但无法连接设备。请使用 Chrome / Edge（HTTPS 或 localhost 访问）。
+  </div>
+
+  <!-- 连接设置行 -->
+  <div class="row" style="margin-bottom:16px;">
+    <div class="form-group" style="flex:0 1 220px;">
+      <label for="nameFilter">设备名称前缀</label>
+      <input type="text" id="nameFilter" placeholder="留空则列出全部设备" value="" autocomplete="off">
+    </div>
+    <span class="badge off" id="bleStatus"><span id="bleStatusText">未连接</span></span>
+    <span class="kv" id="bleDeviceName"></span>
+    <span class="spacer"></span>
+    <span class="hint">帧格式 <code>55 AA … 0D</code>，服务 <code>FFE0</code></span>
+  </div>
+
+  <div class="grid-2">
+    <!-- ================= 左侧：输入 + 输出 ================= -->
+    <div class="col">
+
+      <section class="card">
+        <div class="card-title">
+          <span>1 · 图像输入</span>
+          <span class="sub" id="srcMeta">未选择图片</span>
+        </div>
+
+        <div class="dropzone" id="dropzone">
+          <div><strong>拖拽图片到这里</strong>，或点击选择文件</div>
+          <div class="hint" style="margin-top:6px;">支持 PNG / JPG / WebP / GIF / BMP，图片不会上传到任何服务器</div>
+          <input type="file" id="fileInput" accept="image/*">
+        </div>
+
+        <div class="form-row" style="margin-top:14px;">
+          <div class="form-group">
+            <label for="fitMode">尺寸适配</label>
+            <select id="fitMode">
+              <option value="contain">等比缩放 + 留白（推荐）</option>
+              <option value="cover">等比缩放 + 居中裁剪</option>
+              <option value="stretch">拉伸铺满</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="sizePreset">目标分辨率</label>
+            <select id="sizePreset">
+              <option value="480x720" selected>480 × 720（E6 面板）</option>
+              <option value="400x600">400 × 600</option>
+              <option value="640x480">640 × 480</option>
+              <option value="custom">自定义</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-top:12px;">
+          <div class="form-group">
+            <label for="imgW">宽（像素）</label>
+            <input type="number" id="imgW" value="480" min="8" max="4096" step="1">
+          </div>
+          <div class="form-group">
+            <label for="imgH">高（像素）</label>
+            <input type="number" id="imgH" value="720" min="8" max="4096" step="1">
+          </div>
+          <div class="form-group" style="flex:0 0 120px;">
+            <label>&nbsp;</label>
+            <div class="kv" id="bytesPreview">—</div>
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-top:12px;">
+          <div class="form-group">
+            <label for="algo">抖动算法</label>
+            <select id="algo"></select>
+          </div>
+          <div class="form-group" style="flex:0 0 auto;">
+            <label>&nbsp;</label>
+            <div class="check-row">
+              <input type="checkbox" id="serpentine" checked>
+              <label for="serpentine" style="cursor:pointer;">蛇形扫描</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-top:12px;">
+          <div class="form-group">
+            <label for="brightness">亮度 <span class="range-value" id="brightnessVal">0</span></label>
+            <input type="range" id="brightness" min="-100" max="100" value="0">
+          </div>
+          <div class="form-group">
+            <label for="contrast">对比度 <span class="range-value" id="contrastVal">0</span></label>
+            <input type="range" id="contrast" min="-100" max="100" value="0">
+          </div>
+          <div class="form-group">
+            <label for="strength">抖动强度 <span class="range-value" id="strengthVal">100%</span></label>
+            <input type="range" id="strength" min="0" max="100" value="100">
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:16px;">
+          <button class="btn btn-primary" id="btnConvert" type="button" disabled>转换</button>
+          <button class="btn" id="btnReset" type="button">重置参数</button>
+          <span class="spacer"></span>
+          <span class="badge off" id="convertState">等待图片</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">
+          <span>3 · 数据输出</span>
+          <span class="sub" id="outMeta">—</span>
+        </div>
+
+        <div class="data-meta">
+          <span class="kv">尺寸 <b id="metaSize">—</b></span>
+          <span class="kv">字节数 <b id="metaBytes">—</b></span>
+          <span class="kv">每像素 <b id="metaBpp">—</b></span>
+        </div>
+
+        <div class="color-stats" id="colorStats"></div>
+
+        <div class="divider"></div>
+
+        <div class="row" style="margin-bottom:10px;">
+          <button class="btn btn-sm" id="btnExportBin" type="button" disabled>⬇ 导出 .bin</button>
+          <button class="btn btn-sm" id="btnExportC" type="button" disabled>⬇ 导出 C 数组</button>
+          <button class="btn btn-sm" id="btnCopyHex" type="button" disabled>⧉ 复制 hex</button>
+        </div>
+        <textarea class="code-box" id="hexOut" readonly placeholder="转换后这里显示前 128 字节的十六进制…"></textarea>
+      </section>
+    </div>
+
+    <!-- ================= 右侧：预览 + 设备 ================= -->
+    <div class="col">
+
+      <section class="card">
+        <div class="card-title">
+          <span>2 · 预览</span>
+          <span class="segmented" id="zoomSeg">
+            <button type="button" data-zoom="fit" class="active">适应</button>
+            <button type="button" data-zoom="1">1×</button>
+            <button type="button" data-zoom="2">2×</button>
+            <button type="button" data-zoom="4">4×</button>
+          </span>
+        </div>
+
+        <div class="preview-label">原图（按目标尺寸绘制）</div>
+        <div class="preview-wrap" id="srcWrap">
+          <div class="preview-empty">选择图片后显示</div>
+        </div>
+
+        <div class="preview-label" style="margin-top:14px;">抖动结果（6 色）</div>
+        <div class="preview-wrap" id="outWrap">
+          <div class="preview-empty">点击「转换」后显示</div>
+        </div>
+      </section>
+
+      <section class="card" id="device">
+        <div class="card-title">
+          <span>4 · 设备控制</span>
+          <span class="sub">CH592F / FFE0</span>
+        </div>
+
+        <label>刷纯色</label>
+        <div class="swatch-grid swatch-row" id="swatchGrid"></div>
+
+        <div class="divider"></div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="slotSelect">图片槽（擦除用）</label>
+            <select id="slotSelect"></select>
+          </div>
+          <div class="form-group" style="flex:0 0 auto;justify-content:flex-end;">
+            <label>&nbsp;</label>
+            <button class="btn btn-sm" id="btnErase" type="button" disabled>擦除该槽</button>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:12px;">
+          <button class="btn btn-sm" id="btnReadRev" type="button" disabled>读取 IC 版本</button>
+          <button class="btn btn-sm" id="btnUpload" type="button" disabled title="固件暂未实现写图命令">⬆ 上传图像</button>
+        </div>
+        <div class="hint" style="margin-top:8px;">
+          图像传输需要固件提供写 Flash 命令（当前固件只有 <code>0x00 / 0x10 / 0x20</code>），
+          所以「上传图像」暂不可用：请先导出 <code>.bin</code>，固件补齐后再开放。
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-title">
+          <span>5 · 日志</span>
+          <button class="btn btn-sm" id="btnClearLog" type="button">清空</button>
+        </div>
+        <div class="log-box" id="logBox"></div>
+      </section>
+    </div>
+  </div>
+
+  <footer class="page-foot">
+    <span>EPD Toolbox · E6 六色</span>
+    <a href="./index.html">返回工具箱</a>
+    <a href="./index.html#format">数据格式速查</a>
+  </footer>
+</div>
+
+<script src="assets/js/e6-codec.js"></script>
+<script src="assets/js/ble.js"></script>
+<script src="assets/js/e6-page.js"></script>
+</body>
+</html>
