@@ -21,8 +21,8 @@
     </div>
     <div class="topbar-right">
       <a class="btn btn-sm" href="e6-image.html">E6 图像转换</a>
+      <a class="btn btn-sm" href="ble-console.html">BLE 命令测试</a>
       <a class="btn btn-sm" href="#format">数据格式</a>
-      <a class="btn btn-sm" href="#tools">工具列表</a>
     </div>
   </div>
 
@@ -30,7 +30,7 @@
     <h1><span class="icon">🧰</span> EPD Toolbox</h1>
     <p>
       电子纸上位机工具箱。当前提供 <b>E6 六色（黑 / 白 / 黄 / 红 / 蓝 / 绿）</b> 图片抖动量化、
-      4bpp 数据打包导出，以及通过 Web Bluetooth 直接控制设备的刷屏命令。
+      4bpp 数据打包导出，以及独立的 BLE 命令测试页（读版本 / 刷纯色 / 擦除槽）。
       纯静态页面，无后端、无构建步骤。
     </p>
   </header>
@@ -46,10 +46,10 @@
       <div class="tool-meta"><span>抖动算法 12 种</span><span>480×720</span><span>0.5 B/像素</span></div>
     </a>
 
-    <a class="tool-card" href="e6-image.html#device">
+    <a class="tool-card" href="ble-console.html">
       <div class="tool-icon">📶</div>
-      <h3>BLE 设备控制 <span class="badge ready">可用</span></h3>
-      <p>连接 FFE0 服务，发送刷纯色、读 IC 版本、擦除图片槽命令，实时查看 0x55 0xAA 帧响应。</p>
+      <h3>BLE 命令测试 <span class="badge ready">可用</span></h3>
+      <p>独立测试页：0x00 读 IC 版本、0x10 刷纯色（六色可选）、0x20 擦除图片槽，实时查看帧收发与耗时。</p>
       <div class="tool-meta"><span>CH592F</span><span>FFE3 / FFE4</span><span>Web Bluetooth</span></div>
     </a>
 
