@@ -49,7 +49,7 @@
     eraseState: $('eraseState'),
     eraseMs: $('eraseMs'),
 
-    upSlot: $('upSlot'),
+    upSlotSelect: $('upSlotSelect'),
     btnUploadTest: $('btnUploadTest'),
     btnUploadCancel: $('btnUploadCancel'),
     upState: $('upState'),
@@ -133,14 +133,19 @@
   }
 
   /* ---------------- 控件初始化 ---------------- */
-  function initSlots() {
+  function fillSlotSelect(select) {
     for (let i = 0; i <= SLOT_MAX; i++) {
       const opt = document.createElement('option');
       opt.value = String(i);
       opt.textContent = '槽 ' + i;
-      el.slotSelect.appendChild(opt);
+      select.appendChild(opt);
     }
-    el.slotSelect.value = '0';
+    select.value = '0';
+  }
+
+  function initSlots() {
+    fillSlotSelect(el.slotSelect); // 擦除卡片
+    fillSlotSelect(el.upSlotSelect); // 送图卡片（独立选择，互不影响）
   }
 
   function initColors() {
@@ -185,12 +190,12 @@
   /** 每张卡片下方的「发送帧」预览，参数一变就重算，方便对照抓包 */
   function updateFrames() {
     const slot = Number(el.slotSelect.value) || 0;
+    const upSlot = Number(el.upSlotSelect.value) || 0;
     el.revFrame.textContent = BLE.hex(BLE.buildFrame(CMD.REVISION, [0x00]));
     el.colorFrame.textContent = BLE.hex(BLE.buildFrame(CMD.UPDATE_COLOR, [selectedColor]));
     el.eraseFrame.textContent = BLE.hex(BLE.buildFrame(CMD.FLASH_ERASE, [slot]));
-    el.upSlot.textContent = '槽 ' + slot;
     if (testImage) {
-      const head = BLE.buildImageChunkFrame(slot, 0, testImage.bytes.subarray(0, BLE.CHUNK_PAYLOAD));
+      const head = BLE.buildImageChunkFrame(upSlot, 0, testImage.bytes.subarray(0, BLE.CHUNK_PAYLOAD));
       el.upFrame.textContent = BLE.hex(head.subarray(0, 16)) + ' … (' + head.length + ' 字节)';
     }
   }
@@ -254,6 +259,7 @@
     el.btnErase.disabled = !usable;
     el.btnUploadTest.disabled = !usable;
     el.slotSelect.disabled = !usable;
+    el.upSlotSelect.disabled = !usable;
     Array.from(el.colorGrid.children).forEach((btn) => (btn.disabled = !usable));
     if (!usable) el.btnUploadCancel.disabled = true;
   }
@@ -286,16 +292,21 @@
       if (!connected) stopProgress();
     },
     onHeartbeat: (cmd, count) => {
-      // 刷屏期间固件持续发 0x01 保活：不算失败，只用来续命 + 刷新进度
+      // 0x01 是「已受理 / 仍在处理」：既不能当失败，也不一定每个 cmd 都会发心跳
       hbCount = count;
-      if (count === 1) {
-        log('sys', (cmd === CMD.UPDATE_COLOR ? '刷屏' : '擦除') + '仍在进行，收到设备心跳（保持等待）');
+      if (count !== 1) return;
+      if (cmd === CMD.UPDATE_COLOR) {
+        log('sys', '刷屏仍在进行，收到设备心跳（保持等待）');
+      } else if (cmd === CMD.FLASH_ERASE) {
+        log('sys', '擦除仍在进行，收到设备心跳（保持等待）');
       }
+      // 0x30 送图是「每片一次 0x01」，进度条已经在报，不再逐片写日志
     },
   });
 
   el.nameFilter.addEventListener('input', updateFrames);
   el.slotSelect.addEventListener('change', updateFrames);
+  el.upSlotSelect.addEventListener('change', updateFrames);
 
   el.btnConnect.addEventListener('click', async () => {
     try {
@@ -391,7 +402,9 @@
     startProgress(el.eraseState, '擦除中');
     const t0 = performance.now();
     try {
-      await client.eraseSlot(slot);
+      await client.eraseSlot(slot, {
+        onRetry: (info) => log('sys', '擦除第 ' + info.attempt + ' 次失败（' + info.error.message + '），重发'),
+      });
       const ms = Math.round(performance.now() - t0);
       stopProgress();
       el.eraseMs.textContent = ms + ' ms';
@@ -412,7 +425,7 @@
   /* ---------------- 0x30 测试送图 ---------------- */
   el.btnUploadTest.addEventListener('click', async () => {
     if (busy) return log('sys', '上一条命令还在执行，稍等');
-    const slot = Number(el.slotSelect.value) || 0;
+    const slot = Number(el.upSlotSelect.value) || 0;
     const img = getTestImage();
 
     busy = true;
@@ -423,12 +436,15 @@
     el.upSpeed.textContent = '—';
     setProgress(0, '准备中…');
     const t0 = performance.now();
+    let retries = 0;
 
     try {
       // 1) 先擦除目标槽并等 DONE —— 协议要求写图前槽是干净的
       setCmdState(el.upState, 'running', '擦除中…');
       setProgress(0, '擦除槽 ' + slot + ' …');
-      await client.eraseSlot(slot);
+      await client.eraseSlot(slot, {
+        onRetry: (info) => log('sys', '擦除第 ' + info.attempt + ' 次失败（' + info.error.message + '），重发'),
+      });
       log('ok', '槽 ' + slot + ' 擦除完成，开始送图（' + img.bytes.length + ' 字节 / ' + BLE.IMAGE_CHUNKS + ' 片）');
 
       // 2) 逐片写入，每片等 DONE
@@ -437,13 +453,15 @@
       let lastTime = performance.now();
       const res = await client.writeImage(slot, img.bytes, {
         idleMs: 5000,
+        attempts: 3, // 每片最多试 3 次（GATT 并发/瞬时错误重发）
         shouldStop: () => uploadAbort,
         onProgress: (p) => {
           const ratio = p.sent / p.total;
           setProgress(
             ratio,
             '送图 ' + (p.index + 1) + '/' + p.count + ' 片 · ' + (ratio * 100).toFixed(1) + '% · ' +
-              p.sent.toLocaleString() + '/' + p.total.toLocaleString() + ' 字节'
+              p.sent.toLocaleString() + '/' + p.total.toLocaleString() + ' 字节' +
+              (retries ? ' · 重试 ' + retries + ' 次' : '')
           );
           const now = performance.now();
           if (now - lastTime > 400) {
@@ -453,13 +471,19 @@
             lastTime = now;
           }
         },
+        onRetry: (info) => {
+          retries++;
+          const msg = '第 ' + (info.index + 1) + ' 片第 ' + info.attempt + ' 次失败（' + info.error.message + '），重发';
+          log('sys', msg);
+          el.upText.textContent = '重发第 ' + (info.index + 1) + ' 片（第 ' + info.attempt + ' 次重试）…';
+        },
       });
 
       const sec = (performance.now() - t0) / 1000;
       el.upMs.textContent = sec.toFixed(1) + ' s';
-      setProgress(1, '完成：' + res.chunks + ' 片 / ' + res.bytes.toLocaleString() + ' 字节');
+      setProgress(1, '完成：' + res.chunks + ' 片 / ' + res.bytes.toLocaleString() + ' 字节' + (retries ? ' · 重试 ' + retries + ' 次' : ''));
       setCmdState(el.upState, 'ok', '完成 · 槽 ' + slot);
-      log('ok', '送图完成：槽 ' + slot + '，' + res.chunks + ' 片，' + sec.toFixed(1) + ' s（固件暂无刷图命令，数据已落盘）');
+      log('ok', '送图完成：槽 ' + slot + '，' + res.chunks + ' 片，' + sec.toFixed(1) + ' s' + (retries ? '，重试 ' + retries + ' 次' : '') + '（固件暂无刷图命令，数据已落盘）');
     } catch (err) {
       const sec = (performance.now() - t0) / 1000;
       el.upMs.textContent = sec.toFixed(1) + ' s';
