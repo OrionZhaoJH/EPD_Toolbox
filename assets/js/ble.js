@@ -13,11 +13,13 @@
      FFE3/FFE4 单包长度 20 字节，所以命令帧都很短
 
    命令码（CHAR3_CMD_t）：
-     0x00 读 IC 版本     55 AA 00 08 00 00 00 0D  → 响应带 3 字节版本号
+     0x00 读 IC 版本     55 AA 00 08 00 00 00 0D
+                         → 应答 55 AA 00 0A 00 R1 R2 R3 00 0D（无响应码，PAYLOAD 即版本号）
      0x10 刷纯色         data[0] = 颜色编号 0~7
      0x20 擦除图片槽     data[0] = image_id 0~10
-   响应码（RESPONSE_CODE_t）：
+   响应码（RESPONSE_CODE_t，仅 0x10 / 0x20 这类带状态应答的命令使用）：
      0x00 成功 / 0x01 受理中(DOING) / 0x02 完成(DONE) / 0x03 忙 / 0xE0+ 各类错误
+   注意：解析帧时不能一律把 PAYLOAD 首字节当响应码，读版本的应答首字节是版本号。
    ========================================================================== */
 (function (global) {
   'use strict';
@@ -89,6 +91,43 @@
     return Array.from(bytes)
       .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
       .join(' ');
+  }
+
+  /**
+   * 从接收缓冲区里切出完整帧（原地消费 rx）。
+   * 帧格式：55 AA LEN_H LEN_L CMD PAYLOAD... CRC 0D，PAYLOAD 长度 = LEN - 7。
+   * 注意：不同命令的 PAYLOAD 语义不一样——
+   *   0x10 / 0x20 的 PAYLOAD 第 1 字节是响应码（0x00 成功 / 0x01 受理 / 0x02 完成…）
+   *   0x00 读版本的 PAYLOAD 就是 3 字节版本号，没有响应码
+   * 所以这里只负责切帧，语义交给调用方，避免拿版本号当响应码用。
+   *
+   * @param {number[]} rx 可变数组，会被原地修改
+   * @param {(frame:{cmd:number,code:number,data:Uint8Array,raw:Uint8Array})=>void} onFrame
+   * @param {(type:string,text:string)=>void} [logFn]
+   */
+  function parseStream(rx, onFrame, logFn) {
+    for (;;) {
+      // 丢弃帧头之前的噪声
+      while (rx.length >= 2 && !(rx[0] === HEAD1 && rx[1] === HEAD2)) rx.shift();
+      if (rx.length < 4) return;
+      const len = (rx[2] << 8) | rx[3];
+      if (len < 7 || len > 512) {
+        rx.shift();
+        continue;
+      }
+      if (rx.length < len) return;
+      const frame = rx.splice(0, len);
+      if (frame[len - 1] !== TAIL) {
+        if (logFn) logFn('err', '收到的帧尾不是 0x0D，已丢弃：' + hex(frame));
+        continue;
+      }
+      onFrame({
+        cmd: frame[4],
+        code: frame[5], // 仅 0x10 / 0x20 等带响应码的命令有意义
+        data: frame.slice(5, len - 2),
+        raw: frame,
+      });
+    }
   }
 
   /**
@@ -185,37 +224,10 @@
       const value = event.target.value;
       const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
       for (let i = 0; i < bytes.length; i++) client.rx.push(bytes[i]);
-      parseRx();
-    }
-
-    function parseRx() {
-      for (;;) {
-        // 丢弃帧头之前的噪声
-        while (client.rx.length >= 2 && !(client.rx[0] === HEAD1 && client.rx[1] === HEAD2)) {
-          client.rx.shift();
-        }
-        if (client.rx.length < 4) return;
-        const len = (client.rx[2] << 8) | client.rx[3];
-        if (len < 7 || len > 512) {
-          client.rx.shift();
-          continue;
-        }
-        if (client.rx.length < len) return;
-        const frame = client.rx.splice(0, len);
-        if (frame[len - 1] !== TAIL) {
-          log('err', '收到的帧尾不是 0x0D，已丢弃：' + hex(frame));
-          continue;
-        }
-        const parsed = {
-          cmd: frame[4],
-          code: frame[5],
-          data: frame.slice(5, len - 2),
-          raw: frame,
-        };
-        client.lastFrame = parsed;
-        log('rx', '接收 ' + hex(frame));
-        if (h.onFrame) h.onFrame(parsed);
-      }
+      parseStream(client.rx, (frame) => {
+        client.lastFrame = frame;
+        if (h.onFrame) h.onFrame(frame);
+      }, log);
     }
 
     client.cmdName = function (cmd) {
@@ -274,8 +286,31 @@
       });
     };
 
-    client.readRevision = function () {
-      return client.sendAndWait(CMD.REVISION, [0x00], 3000);
+    /**
+     * 读 IC 版本。
+     * 固件对 0x00 的应答**没有响应码**：55 AA 00 0A 00 R1 R2 R3 00 0D，
+     * PAYLOAD 直接就是 3 字节版本号，所以不能走 sendAndWait（那会把 R1 当响应码，
+     * 实测会报「未知响应 0x10」，而 0x10 其实正是版本号的第一个字节）。
+     */
+    client.readRevision = function (timeout) {
+      return new Promise((resolve, reject) => {
+        const prev = h.onFrame;
+        const finish = (fn, arg) => {
+          clearTimeout(timer);
+          h.onFrame = prev;
+          fn(arg);
+        };
+        const timer = setTimeout(
+          () => finish(reject, new Error('等待响应超时（读版本）')),
+          timeout || 3000
+        );
+        h.onFrame = function (frame) {
+          if (prev) prev(frame);
+          if (frame.cmd !== CMD.REVISION) return;
+          finish(resolve, frame);
+        };
+        client.send(CMD.REVISION, [0x00]).catch((err) => finish(reject, err));
+      });
     };
 
     client.updateColor = function (colorId) {
@@ -294,6 +329,7 @@
   global.EPDBLE = {
     create,
     buildFrame,
+    parseStream,
     toUuid,
     hex,
     CMD,

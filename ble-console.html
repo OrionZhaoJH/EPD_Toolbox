@@ -90,7 +90,10 @@
           <span>0x00 · 读 IC 版本</span>
           <span class="sub">CHAR3_CMD_00_REVISION</span>
         </div>
-        <p class="hint">读回面板驱动 IC 的版本号，响应数据为 3 个字节。</p>
+        <p class="hint">
+          读回面板驱动 IC 的版本号。应答没有响应码，PAYLOAD 直接就是 3 字节版本号
+          （如 <code class="mono">10 84 02</code>）。
+        </p>
 
         <div class="row" style="margin-top:12px;">
           <button class="btn btn-primary" id="btnRev" type="button" disabled>读取版本</button>

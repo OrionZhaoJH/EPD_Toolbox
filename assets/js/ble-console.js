@@ -211,11 +211,10 @@
     try {
       const frame = await client.readRevision();
       const ms = Math.round(performance.now() - t0);
-      const rev = Array.from(frame.data)
-        .map((b) => '0x' + b.toString(16).padStart(2, '0').toUpperCase())
-        .join(' ');
+      // 0x00 的应答没有响应码，PAYLOAD 就是 3 字节版本号
+      const rev = BLE.hex(frame.data);
       el.revMs.textContent = ms + ' ms';
-      el.revResult.textContent = 'IC Revision：' + (rev || '（响应无数据）');
+      el.revResult.textContent = 'IC Revision：' + (rev || '（响应无数据）') + '\n帧：' + BLE.hex(frame.raw);
       setCmdState(el.revState, 'ok', '成功');
       log('ok', '读版本成功：' + (rev || '无数据') + '（' + ms + ' ms）');
     } catch (err) {
