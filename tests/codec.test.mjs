@@ -177,7 +177,53 @@ ok(C.frameBytes(480, 719) === 480 * 360, '奇数高度向上取整');
   ok(same, '480×720 往返一致');
 }
 
-/* 7. 内置自检 */
+/* 7. 上下左右翻转（旋转 180°） */
+{
+  const w = 3;
+  const h = 2;
+  const img = new FakeImageData(w, h);
+  // 每像素的 R 通道就是它的序号，方便核对位置
+  for (let p = 0; p < w * h; p++) {
+    img.data[p * 4] = p;
+    img.data[p * 4 + 3] = 255;
+  }
+  const flipped = C.flip180(img);
+  let pass = flipped.width === w && flipped.height === h;
+  // (0,0) 应该跑到 (w-1,h-1)，即像素 0 → 像素 5；(2,0) → (0,1)，即像素 2 → 像素 3
+  const at = (d, x, y) => d.data[(y * w + x) * 4];
+  pass = pass && at(flipped, w - 1, h - 1) === 0 && at(flipped, 0, h - 1) === w - 1;
+  pass = pass && at(flipped, 0, 0) === w * h - 1 && at(flipped, w - 1, 0) === w * (h - 1);
+  ok(pass, 'flip180：左上角 ↔ 右下角，尺寸不变');
+  ok(at(img, 0, 0) === 0, 'flip180：不修改入参');
+
+  const twice = C.flip180(flipped);
+  let same = true;
+  for (let i = 0; i < img.data.length; i++) if (img.data[i] !== twice.data[i]) { same = false; break; }
+  ok(same, 'flip180 两次回到原图');
+
+  // 用四个不同颜色的小图核对：翻转会改变打包后的字节（左右上下都换过）
+  const cw = 2;
+  const ch = 2;
+  const colors = [
+    [0, 0, 0],
+    [255, 255, 255],
+    [230, 40, 30],
+    [20, 80, 200],
+  ];
+  const img2 = new FakeImageData(cw, ch);
+  colors.forEach(([r, g, b], p) => {
+    img2.data[p * 4] = r;
+    img2.data[p * 4 + 1] = g;
+    img2.data[p * 4 + 2] = b;
+    img2.data[p * 4 + 3] = 255;
+  });
+  const packOf = (im) => C.toHex(C.pack(C.dither(im, { algo: 'threshold' }).ids, cw, ch));
+  const before = packOf(img2);
+  const after = packOf(C.flip180(img2));
+  ok(before !== after, 'flip180 会真的改变打包结果（' + before + ' → ' + after + '）');
+}
+
+/* 8. 内置自检 */
 ok(C.selfTest().ok, 'Codec.selfTest() 通过');
 
 if (fail.length) {

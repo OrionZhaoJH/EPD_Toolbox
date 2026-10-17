@@ -275,6 +275,33 @@
     return { ids, width: w, height: h, imageData: idsToImageData(ids, w, h), stats: stats(ids) };
   }
 
+  /**
+   * 上下左右翻转（等价于旋转 180°）：屏幕装反时用来把源图摆正。
+   * 纯像素重排，不经过 canvas 旋转，避免半像素采样带来的毛边；
+   * 尺寸、通道数都不变，(x, y) → (w-1-x, h-1-y)。
+   * @param {ImageData} imageData 任意尺寸的源数据
+   * @returns {ImageData} 翻转后的新数据（不修改入参）
+   */
+  function flip180(imageData) {
+    const w = imageData.width;
+    const h = imageData.height;
+    const src = imageData.data;
+    const out = new Uint8ClampedArray(src.length);
+    for (let y = 0; y < h; y++) {
+      const srcRow = (h - 1 - y) * w; // 倒着取行：上下翻转
+      const dstRow = y * w;
+      for (let x = 0; x < w; x++) {
+        const si = (srcRow + (w - 1 - x)) * 4; // 行内倒着取列：左右翻转
+        const di = (dstRow + x) * 4;
+        out[di] = src[si];
+        out[di + 1] = src[si + 1];
+        out[di + 2] = src[si + 2];
+        out[di + 3] = src[si + 3];
+      }
+    }
+    return new ImageData(out, w, h);
+  }
+
   /** 调色板索引数组 → 可直接绘制/导出的 ImageData */
   function idsToImageData(ids, w, h) {
     const out = new ImageData(w, h);
@@ -396,6 +423,7 @@
     drawFitted,
     preprocess,
     dither,
+    flip180,
     idsToImageData,
     pack,
     unpack,
