@@ -21,8 +21,12 @@
     <div class="topbar-right">
       <!-- 滚动后顶栏才出现连接状态，避免与下方状态行重复 -->
       <span class="badge off" id="bleStatusTop"><span id="bleStatusTopText">未连接</span></span>
-      <button class="btn btn-primary btn-sm" id="btnConnect" type="button">🔗 连接 BLE</button>
-      <button class="btn btn-danger btn-sm" id="btnDisconnect" type="button" disabled>⏏️ 断开</button>
+      <button class="btn btn-primary btn-sm" id="btnConnect" type="button" title="连接 BLE 设备">
+        <span class="btn-ico">🔗</span><span class="btn-label">连接 BLE</span>
+      </button>
+      <button class="btn btn-danger btn-sm" id="btnDisconnect" type="button" disabled title="断开连接">
+        <span class="btn-ico">⏏️</span><span class="btn-label">断开</span>
+      </button>
     </div>
   </div>
 

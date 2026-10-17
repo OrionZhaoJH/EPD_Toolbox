@@ -66,17 +66,19 @@
   <div class="grid-2" style="margin-top:18px;">
     <section class="card" id="format">
       <div class="card-title"><span>E6 像素编码</span><span class="sub">4 bit / 像素，两像素一字节</span></div>
-      <table class="spec">
-        <thead><tr><th>颜色</th><th>编号（写入像素的值）</th><th>色块</th></tr></thead>
-        <tbody>
-          <tr><td>黑 Black</td><td class="mono">0</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#000"></span></td></tr>
-          <tr><td>白 White</td><td class="mono">1</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#fff"></span></td></tr>
-          <tr><td>黄 Yellow</td><td class="mono">2</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#ffe600"></span></td></tr>
-          <tr><td>红 Red</td><td class="mono">3</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#e8332a"></span></td></tr>
-          <tr><td>蓝 Blue</td><td class="mono">5</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#1b57c4"></span></td></tr>
-          <tr><td>绿 Green</td><td class="mono">6</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#1f9d55"></span></td></tr>
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <table class="spec">
+          <thead><tr><th>颜色</th><th>编号（写入像素的值）</th><th>色块</th></tr></thead>
+          <tbody>
+            <tr><td>黑 Black</td><td class="mono">0</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#000"></span></td></tr>
+            <tr><td>白 White</td><td class="mono">1</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#fff"></span></td></tr>
+            <tr><td>黄 Yellow</td><td class="mono">2</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#ffe600"></span></td></tr>
+            <tr><td>红 Red</td><td class="mono">3</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#e8332a"></span></td></tr>
+            <tr><td>蓝 Blue</td><td class="mono">5</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#1b57c4"></span></td></tr>
+            <tr><td>绿 Green</td><td class="mono">6</td><td><span style="display:inline-block;width:42px;height:14px;border-radius:3px;border:1px solid #cbd5e1;background:#1f9d55"></span></td></tr>
+          </tbody>
+        </table>
+      </div>
       <div class="divider"></div>
       <div class="hint">
         编号 4 与 7 为保留值，不参与量化。字节内的排布：
@@ -88,17 +90,19 @@
 
     <section class="card">
       <div class="card-title"><span>BLE 命令帧</span><span class="sub">FFE3 写 / FFE4 通知</span></div>
-      <table class="spec">
-        <thead><tr><th>字段</th><th>长度</th><th>说明</th></tr></thead>
-        <tbody>
-          <tr><td class="mono">55 AA</td><td>2</td><td>帧头</td></tr>
-          <tr><td class="mono">LEN_H LEN_L</td><td>2</td><td>整帧长度（含帧头帧尾）</td></tr>
-          <tr><td class="mono">CMD</td><td>1</td><td>0x00 读版本 / 0x10 刷纯色 / 0x20 擦除槽</td></tr>
-          <tr><td class="mono">DATA</td><td>n</td><td>命令参数，刷纯色时为颜色编号</td></tr>
-          <tr><td class="mono">CRC</td><td>1</td><td>固件暂不校验，填 0x00</td></tr>
-          <tr><td class="mono">0D</td><td>1</td><td>帧尾</td></tr>
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <table class="spec">
+          <thead><tr><th>字段</th><th>长度</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">55 AA</td><td>2</td><td>帧头</td></tr>
+            <tr><td class="mono">LEN_H LEN_L</td><td>2</td><td>整帧长度（含帧头帧尾）</td></tr>
+            <tr><td class="mono">CMD</td><td>1</td><td>0x00 读版本 / 0x10 刷纯色 / 0x20 擦除槽</td></tr>
+            <tr><td class="mono">DATA</td><td>n</td><td>命令参数，刷纯色时为颜色编号</td></tr>
+            <tr><td class="mono">CRC</td><td>1</td><td>固件暂不校验，填 0x00</td></tr>
+            <tr><td class="mono">0D</td><td>1</td><td>帧尾</td></tr>
+          </tbody>
+        </table>
+      </div>
       <div class="divider"></div>
       <div class="hint">
         例：刷白色 → <code class="mono">55 AA 00 08 10 01 00 0D</code>；

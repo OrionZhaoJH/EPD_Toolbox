@@ -154,7 +154,6 @@ code, kbd, pre { font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monos
 
 @media (max-width: 640px) {
   body { padding: 12px 14px 32px; }
-  .topbar-right { width: 100%; margin-left: 0; justify-content: flex-start; }
 }
 
 /* --------------------------------------------------------------------------
@@ -516,6 +515,55 @@ table.spec { width: 100%; border-collapse: collapse; font-size: .82rem; }
 table.spec th, table.spec td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
 table.spec th { color: var(--text-muted); font-weight: 500; font-size: .78rem; }
 table.spec tr:last-child td { border-bottom: none; }
+/* 窄屏下表格可横向滚动，不撑破卡片 */
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 /* 页脚 */
 footer.page-foot { margin-top: 28px; font-size: .78rem; color: var(--text-light); display: flex; gap: 14px; flex-wrap: wrap; }
+
+/* --------------------------------------------------------------------------
+   移动端适配（≤ 640px）
+   要点：单列布局、表单项独占一行、输入字号 ≥16px 防 iOS 聚焦放大、
+        预览区限高、顶栏按钮收紧
+   -------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  header.page-head { margin: 0 0 14px; }
+  header.page-head h1 { font-size: 1.35rem; gap: 8px; }
+  header.page-head h1 .icon { font-size: 1.2rem; }
+  header.page-head p { font-size: .85rem; }
+
+  .card { padding: 14px; border-radius: 10px; }
+  .card-title { font-size: .95rem; margin-bottom: 12px; }
+  .col, .grid-2, .grid-3 { gap: 14px; }
+
+  .form-row { gap: 10px; }
+  .form-group { flex: 1 1 100%; }
+
+  /* iOS 对字号小于 16px 的输入框会在聚焦时自动放大整页 */
+  input[type="text"], input[type="number"], select { font-size: 16px; }
+
+  .topbar { padding: 8px 0; }
+  .topbar.scrolled { padding: 8px 10px; margin: 0 -10px 12px; }
+  /* 顶栏按钮在手机上收成图标，避免「返回 + 状态 + 两个按钮」被迫换行占两行高度 */
+  .topbar-right { width: auto; margin-left: auto; justify-content: flex-end; gap: 6px; }
+  .topbar-right .btn { padding: 6px 9px; font-size: .78rem; }
+  .topbar-right .btn-label { display: none; }
+  .topbar-title { font-size: .9rem; }
+
+  .preview-wrap { max-height: 60vh; padding: 6px; }
+  .log-box { height: 180px; }
+  .code-box { min-height: 84px; }
+  .btn { padding: 7px 12px; }
+
+  .swatch { width: 42px; height: 42px; }
+  .color-stat-row { grid-template-columns: 12px 36px 1fr 64px; gap: 6px; font-size: .74rem; }
+
+  .tool-card { padding: 14px; }
+  footer.page-foot { font-size: .72rem; gap: 10px; }
+}
+
+@media (max-width: 420px) {
+  .segmented button { padding: 6px 9px; }
+  .data-meta { gap: 6px; }
+  .btn-sm { padding: 5px 9px; }
+}
