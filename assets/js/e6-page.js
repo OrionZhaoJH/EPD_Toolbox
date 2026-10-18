@@ -101,7 +101,7 @@
      沿用命令测试页的规矩（docs/conventions.md）：
      ① 命令互斥：任一命令执行期间，除连接以外的命令控件全部禁用；
      ② 长命令用「空闲超时 + 心跳保活」，不用固定总超时；
-     ③ 送图先擦后写、逐片等 DONE，单片最多试 3 次；
+     ③ 送图先擦后写：写响应回来就发下一片（不再等 DONE），末尾等 DONE 到齐确认落盘，单片最多试 3 次；
      ④ 送图只写 Flash 不显示，要显示必须再发 0x11。
      送图与刷图共用同一个槽位下拉 el.slotSelect。 */
   const BLE = window.EPDBLE || null;
@@ -551,7 +551,7 @@
       });
       log('ok', '槽 ' + slot + ' 擦除完成，开始送图（' + bytes.length + ' 字节 / ' + BLE.IMAGE_CHUNKS + ' 片）');
 
-      // 2) 逐片写入，每片等 DONE（天然流控，避免固件忙时回 BUSY 丢片）
+      // 2) 逐片写入：写响应回来就发下一片（不再等 DONE），最后统一等落盘确认
       setSendState('running', '送图中…');
       let lastSent = 0;
       let lastTime = performance.now();

@@ -314,7 +314,7 @@
       } else if (cmd === CMD.FLASH_ERASE) {
         log('sys', '擦除仍在进行，收到设备心跳（保持等待）');
       }
-      // 0x30 送图是「每片一次 0x01」，进度条已经在报，不再逐片写日志
+      // 0x30 送图不再回 DOING（写响应即入队），DONE 只用来算进度，不逐片写日志
     },
   });
 
@@ -472,7 +472,8 @@
   });
 
   /* ---------------- 0x30 测试送图 ----------------
-     擦除 → 742 片逐片等 DONE →（可选）0x11 刷屏；中止 / 送图失败 / 送图成功但刷图失败分开提示。 */
+     擦除 → 742 片逐片发（ATT 写响应即「已入队」）→ 等 DONE 到齐确认落盘 →（可选）0x11 刷屏；
+     中止 / 送图失败 / 送图成功但刷图失败分开提示。 */
   el.btnUploadTest.addEventListener('click', async () => {
     if (busy) return log('sys', '上一条命令还在执行，稍等');
     const slot = Number(el.upSlotSelect.value) || 0;
@@ -499,7 +500,7 @@
       });
       log('ok', '槽 ' + slot + ' 擦除完成，开始送图（' + img.bytes.length + ' 字节 / ' + BLE.IMAGE_CHUNKS + ' 片）');
 
-      // 2) 逐片写入，每片等 DONE
+      // 2) 逐片写入：写响应回来就发下一片（不再等 DONE），最后统一等落盘确认
       setCmdState(el.upState, 'running', '送图中…');
       let lastSent = 0;
       let lastTime = performance.now();
@@ -511,7 +512,8 @@
           const ratio = p.sent / p.total;
           setProgress(
             ratio,
-            '送图 ' + (p.index + 1) + '/' + p.count + ' 片 · ' + (ratio * 100).toFixed(1) + '% · ' +
+            '送图 ' + (p.index + 1) + '/' + p.count + ' 片 · 已发 ' + (ratio * 100).toFixed(1) + '% · ' +
+              '落盘 ' + ((p.flashed / p.total) * 100).toFixed(1) + '% · ' +
               p.sent.toLocaleString() + '/' + p.total.toLocaleString() + ' 字节' +
               (retries ? ' · 重试 ' + retries + ' 次' : '')
           );
