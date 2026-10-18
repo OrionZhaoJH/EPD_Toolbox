@@ -47,27 +47,48 @@ try { await client.xxx(); } catch (e) { ... } finally { busy = false; setCommand
 
 **以后加长耗时命令**：先问设备有没有心跳；没有心跳的，给足固定空闲上限并写清在提示里。
 
-## 3. 送图（`0x30`）必须「先擦后写、逐片等 DONE」
+## 3. 送图（`0x30`）：先擦后写，用 ATT 写响应推进
 
-协议见固件仓库 `BLE_Protocol.md`，实现见 `ble.js` 的 `writeImage()`：
+实现见 `ble.js` 的 `writeImage()`：
 
 - **先擦同槽**：发 `0x20` 擦除目标 `image_id`，等 `0x02` 成功才允许送图；
   擦除失败/超时直接中止，不要「擦除没回就继续写」。
 - **分片固定 233 字节**：帧长 244（`55 AA 00 F4 30 [id] [offH offM offL] [payload] 00 0D`），
   offset 大端、从 0 每片 +233；最后一片 payload 147 字节、帧长 158。172800 字节 → 742 片。
-- **每片等 DONE 再发下一片**：这是天然流控，连发会撞上固件忙状态被 `BUSY` 丢弃。
-- **单片失败要重发**：GATT 偶发错误（典型「GATT operation already in progress」）、
-  该片超时、设备回 `BUSY` 都属于可重试；每片最多 3 次（`attempts`，退避 40/80 ms），
-  重试要记一条日志并在进度上标出来。协议错误（`无效数据` / `无效主命令`）不重试，
-  重发也不会变好。
-- **写请求要带响应**：244 字节的包用 Write Request（`writeValueWithResponse`），
-  需要 ATT MTU ≥ 247；Web Bluetooth 没有主动请求 MTU 的接口，只能依赖系统自动协商，
+- **写请求必须带响应**：`writeFrame()` 一律用 `writeValueWithResponse()`（老浏览器退回
+  `writeValue()`），**不再用 `writeValueWithoutResponse()`**——固件 `fe1d988` 起 FFE3 只声明
+  `GATT_PROP_WRITE`，无响应写会直接失败。连接后核对 `writeChar.properties.writeWithoutResponse`：
+  为 `true` 说明设备还在跑旧固件，日志要明确提示「重新烧录后断开重连」。
+  244 字节的包需要 ATT MTU ≥ 247；Web Bluetooth 没有主动请求 MTU 的接口，只能依赖系统自动协商，
   写入报长度错误时要明确提示 MTU 不足。
 - **742 片不逐条写日志**：`client.silentCmd` 让该 cmd 的收发静默，进度交给进度条；
   否则日志被冲掉、页面也会卡。
 - 送图期间同样 `setCommandLock(true)`，并提供「中止」（`shouldStop` 每片检查一次）。
-- 送完图默认接着发 `0x11` 把这一槽刷到屏上（送图卡片「送完自动刷图」复选框，可关掉）；
+- 送完图默认接着发 `0x11` 把这一槽刷到屏上（送图卡片「自动刷图」复选框，默认不勾）；
   只写 flash 不会显示，槽里没数据时 `0x11` 只会刷出空白。
+
+### 3.1 分片的确认方式：ATT 写响应（成功入队不再回 `DOING`）
+
+固件 `074fc03` 起，`0x30` 成功入队时**不再回 `DOING`**，于是「收到 `0x01` 才发下一片」的写法
+会一直等下去。现在的规矩：
+
+- **ATT 写响应 = 已入队**：`await writeFrame()` 一返回就发下一片，不要等 `DONE`；
+- **`DONE`（`0x02`）只做两件事**：更新进度、确认这一片真的写进 Flash
+  （`onProgress` 的 `sent` 由写响应推进，`flashed` 由 DONE 推进，界面两个百分比分别显示）；
+- **收尾必须等 DONE 到齐**：最后一片的写响应只代表入队，`writeImage()` 末尾按「空闲超时」
+  等所有 DONE（期间每来一条新 DONE 就续命 `idleMs`），等不到报
+  「等待 Flash 落盘超时：已确认 N / M 片（可重试）」；
+- **`BUSY`（`0x03`）= 队列满、这一包被丢弃**：不会再有它的 DONE，必须用**同一个 offset**
+  重发（`writeImage()` 用 `acked` + `busyOffsets` 记下来，发送循环里优先重发，
+  重发成功才计入 `sentCount`）；
+- **`0x01` 仍要容忍**：旧固件会回 `DOING`，收到当作无事发生，不要报错；
+- **错误码（`0xE0~0xE7` / `0xFF`）**：按原有逻辑直接失败、不重试（重发不会变好）；
+- **速度**：逐包 `await` 写响应，7.5 ms 连接间隔理论约 31 KB/s、15 ms 约 15 KB/s；
+  「每包等 DONE」只有约 7.8 KB/s，别退回去。带响应写天然串行，也不会撞
+  「GATT operation already in progress」。
+- **`0x20` / `0x11` 不适用本节**：它们仍是「先 `DOING` 心跳、完成推 `DONE`」的异步命令
+  （`0x11` 的完成帧 CMD 见 §4）。
+
 
 ## 4. 刷图（`0x11`）的完成通知 CMD 是 `0x10`（固件约定）
 
