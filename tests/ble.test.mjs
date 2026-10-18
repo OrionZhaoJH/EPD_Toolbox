@@ -183,7 +183,7 @@ console.log('BLE 组帧与解析自测');
   ok(fl[5] === 3, 'image_id 正确写入');
 }
 
-/* 11. writeImage：742 片、offset 递增 233、每片等 DONE */
+/* 11. writeImage：742 片、offset 递增 233、逐片由 ATT 写响应推进（不等 DONE） */
 {
   const handlers = { onLog() {}, onStatus() {}, onFrame() {}, onHeartbeat() {} };
   const client = B.create(handlers);
@@ -199,11 +199,17 @@ console.log('BLE 组帧与解析自测');
   for (let i = 0; i < data.length; i++) data[i] = i & 0xff;
 
   let progress = 0;
-  const res = await client.writeImage(0, data, { onProgress: () => progress++ });
+  const ps = [];
+  const res = await client.writeImage(0, data, {
+    onProgress: (p) => {
+      progress++;
+      ps.push(p);
+    },
+  });
   ok(B.IMAGE_BYTES === 172800 && B.IMAGE_CHUNKS === 742, '常量：172800 字节 / 742 片');
   ok(frames.length === 742 && res.chunks === 742, '实际发出 742 片');
   ok(progress === 742, 'onProgress 回调 742 次');
-
+  ok(res.retries === 0, '没有重试时 res.retries = 0');
   const off = (f) => (f[6] << 16) | (f[7] << 8) | f[8];
   let offsetsOk = true;
   for (let i = 0; i < frames.length; i++) {
@@ -214,6 +220,9 @@ console.log('BLE 组帧与解析自测');
   const last = frames[frames.length - 1];
   ok(last.length === 158, '最后一片帧长 158（payload 147）');
   ok(off(last) === 172653 && off(last) + 147 === 172800, '最后一片 offset 172653 + 147 = 172800');
+
+  ok(ps[0].sent === 233 && ps[0].total === B.IMAGE_BYTES, 'onProgress 带 sent/total（ATT 已确认入队的字节）');
+  ok(ps[0].done === 1 && ps[0].flashed === 233, '同一批 DONE 已计入 done/flashed');
 
   // payload 与源数据对应
   ok(frames[1][9] === data[233] && frames[1][10] === data[234], '第二片 payload 接续源数据');
@@ -364,6 +373,109 @@ console.log('BLE 组帧与解析自测');
   };
   await client.updateImage(2, { onRetry: () => retries++ });
   ok(writes === 2 && retries === 1, '无关 CMD 不误判完成；BUSY 后重发 1 次（写入 2 次）');
+}
+
+/* 17. 带响应写：优先 writeValueWithResponse，绝不调用 writeValueWithoutResponse */
+{
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  const calls = [];
+  client.writeChar = {
+    writeValueWithResponse: async () => calls.push('with'),
+    writeValue: async () => calls.push('value'),
+    writeValueWithoutResponse: async () => calls.push('without'),
+  };
+  await client.send(B.CMD.REVISION, [0x00]);
+  await client.writeFrame(B.buildImageChunkFrame(0, 0, new Uint8Array(233)), { quiet: true });
+  ok(calls.length === 2 && calls[0] === 'with' && calls[1] === 'with', '短命令帧与 244 字节分片都走 writeValueWithResponse');
+  ok(calls.indexOf('without') === -1, '从不调用 writeValueWithoutResponse');
+
+  const old = B.create(handlers);
+  old.connected = true;
+  const calls2 = [];
+  old.writeChar = {
+    writeValue: async () => calls2.push('value'),
+    writeValueWithoutResponse: async () => calls2.push('without'),
+  };
+  await old.send(B.CMD.REVISION, [0x00]);
+  ok(calls2.length === 1 && calls2[0] === 'value', '没有 writeValueWithResponse 的老浏览器退回 writeValue');
+}
+
+/* 18. 0x30 不等 DONE：写响应回来就发下一片，DONE 只用于进度与落盘确认 */
+{
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  let writes = 0;
+  client.writeChar = {
+    writeValueWithResponse: async () => {
+      writes++;
+      // 直到最后一片入队后才补发 DONE，模拟「写入不阻塞发送」
+      if (writes === 742) {
+        setTimeout(() => {
+          for (let i = 0; i < 742; i++) {
+            handlers.onFrame({ cmd: 0x30, code: 0x02, data: new Uint8Array([2]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x30, 2, 0, 0x0d]) });
+          }
+        }, 10);
+      }
+    },
+  };
+
+  const ps = [];
+  const res = await client.writeImage(0, new Uint8Array(B.IMAGE_BYTES), { onProgress: (p) => ps.push(p) });
+  ok(writes === 742, '收到任何 DONE 之前 742 片就全部发完（老写法会在这里卡住）');
+  ok(ps.length === 742 && ps[741].done === 0, '发送阶段 done 仍为 0：DONE 不参与发送节奏');
+  ok(res.chunks === 742 && res.retries === 0, '全部 DONE 到齐后才返回');
+}
+
+/* 19. 收尾确认落盘：最后一片的 ATT 响应只代表入队，必须等 DONE 到齐 */
+{
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  let done = 0;
+  const prev = handlers.onFrame;
+  handlers.onFrame = (f) => {
+    if (f.cmd === 0x30 && f.code === 0x02) done++;
+    if (prev) prev(f);
+  };
+  client.writeChar = {
+    writeValueWithResponse: async () => {
+      // 每片延迟 3ms 才回 DONE：写完全部片时还有一批 DONE 在路上
+      setTimeout(() => handlers.onFrame({ cmd: 0x30, code: 0x02, data: new Uint8Array([2]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x30, 2, 0, 0x0d]) }), 3);
+    },
+  };
+  const res = await client.writeImage(0, new Uint8Array(B.IMAGE_BYTES));
+  ok(res.chunks === 742 && done === 742, 'writeImage 返回时 742 条 DONE 已全部到齐（确认落盘）');
+}
+
+/* 20. BUSY(0x03)：该包被丢弃，必须用同一个 offset 重发 */
+{
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  const offsets = [];
+  let busySent = false;
+  client.writeChar = {
+    writeValueWithResponse: async (frame) => {
+      const f = Uint8Array.from(frame);
+      const off = (f[6] << 16) | (f[7] << 8) | f[8];
+      offsets.push(off);
+      if (offsets.length === 5 && !busySent) {
+        busySent = true;
+        handlers.onFrame({ cmd: 0x30, code: 0x03, data: new Uint8Array([3]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x30, 3, 0, 0x0d]) });
+        return; // 这一包被丢弃，不会再有它的 DONE
+      }
+      handlers.onFrame({ cmd: 0x30, code: 0x02, data: new Uint8Array([2]), raw: new Uint8Array([0x55, 0xaa, 0, 8, 0x30, 2, 0, 0x0d]) });
+    },
+  };
+
+  const retries = [];
+  const res = await client.writeImage(0, new Uint8Array(B.IMAGE_BYTES), { onRetry: (info) => retries.push(info) });
+  ok(offsets[4] === 4 * 233 && offsets[5] === 4 * 233, 'BUSY 后用同一个 offset（4 × 233）重发');
+  ok(retries.length === 1 && retries[0].index === 4, 'onRetry 上报第 5 片、1 次');
+  ok(res.chunks === 742 && res.retries === 1, '重发后仍按 742 片完成');
 }
 
 if (fail.length) {

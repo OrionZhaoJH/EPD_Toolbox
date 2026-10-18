@@ -10,6 +10,13 @@
 
    服务 / 特征（Profile/gattprofile.h）：
      FFE0 服务，FFE3 下行命令（写），FFE4 上行响应（notify）
+     FFE3 只支持带响应写（固件 fe1d988 移除了 GATT_PROP_WRITE_NO_RSP）：
+     一律用 writeValueWithResponse()，老浏览器退回 writeValue()，
+     不要用 writeValueWithoutResponse()（现在会失败）；连接后会核对
+     characteristic.properties.writeWithoutResponse 必须为 false。
+     0x30 送图（固件 074fc03 起）：入队不再回 DOING，ATT 写响应就是「已入队」，
+     收到就发下一片；DONE 只更新进度/确认落盘，不阻塞发送；
+     BUSY 表示该包被丢弃，必须用同一个 offset 重发。
      短命令帧都是 8~9 字节；送图分片最大 244 字节，需要 ATT MTU ≥ 247
      （Web Bluetooth 没有主动请求 MTU 的 API，由系统自动协商）
 
@@ -82,6 +89,27 @@
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /* 让出一个宏任务：给「与 ATT 写响应同一批到达」的 BLE 通知（典型是 BUSY）先处理的机会，
+     否则 BUSY 会被算到下一片上。setTimeout(0) 在 Chrome 有 1ms 起的钳制，742 片会白等
+     0.7 s 以上，所以优先用 MessageChannel —— 同样是一个任务，但不用等计时器。 */
+  const yieldTask = (() => {
+    // 只在真浏览器里用 MessageChannel：Node 的 MessagePort 会挂住事件循环（测试跑完不退出）
+    if (typeof global.document !== 'undefined' && typeof MessageChannel === 'function') {
+      const queue = [];
+      const ch = new MessageChannel();
+      ch.port1.onmessage = () => {
+        const next = queue.shift();
+        if (next) next();
+      };
+      return () =>
+        new Promise((resolve) => {
+          queue.push(resolve);
+          ch.port2.postMessage(0);
+        });
+    }
+    return () => new Promise((resolve) => setTimeout(resolve, 0));
+  })();
 
   /**
    * 通用重试：GATT 操作偶发失败（典型是「GATT operation already in progress」）
@@ -272,6 +300,16 @@
       client.writeChar = await service.getCharacteristic(toUuid(o.writeUuid));
       client.notifyChar = await service.getCharacteristic(toUuid(o.notifyUuid));
 
+      /* 新固件把 FFE3 的 WRITE_NO_RSP 去掉了，只留带响应写。这里顺手核对一次：
+         还是 true 说明烧的固件没更新，或者拿到的是缓存的旧 GATT 表（断电重连即可刷新）。 */
+      const wnr = !!(client.writeChar.properties && client.writeChar.properties.writeWithoutResponse);
+      client.writeWithoutResponse = wnr;
+      if (wnr) {
+        log('err', 'FFE3 仍报告支持无响应写（writeWithoutResponse = true）：固件可能是旧版本，重新烧录后断开重连一次');
+      } else {
+        log('sys', 'FFE3 支持写方式：带响应写（writeWithoutResponse = false），下发一律走 ATT Write Request');
+      }
+
       await client.notifyChar.startNotifications();
       client.notifyChar.addEventListener('characteristicvaluechanged', onNotify);
 
@@ -326,6 +364,12 @@
 
     /**
      * 底层写一帧。
+     *
+     * 固件 fe1d988 起 FFE3 只保留 WRITE 属性（不再支持 Write Command），
+     * 因此一律走带响应写：ATT 响应 = 设备已收到并处理（对 0x30 就是「已入队」）。
+     * 写入是严格串行的：写响应回来之前不发下一帧，否则会撞上
+     * 「GATT operation already in progress」。
+     *
      * @param {Uint8Array} frame
      * @param {{quiet?: boolean}} [opts] quiet = 不写 tx 日志（送图分片会写 742 次）
      */
@@ -334,13 +378,14 @@
       if (!(opts && opts.quiet)) {
         log('tx', '发送 ' + (frame.length > 32 ? hex(frame.subarray(0, 12)) + ' … (' + frame.length + ' 字节)' : hex(frame)));
       }
-      // 协议要求图片分片用 Write Request（有确认），
-      // 0x30 的 244 字节包必须走带响应的写；老浏览器只有 writeValue 可用
-      if (frame.length > 32 && typeof client.writeChar.writeValueWithResponse === 'function') {
-        await client.writeChar.writeValueWithResponse(frame);
+      const ch = client.writeChar;
+      // 有 writeValueWithResponse 就显式用它；老浏览器只有 writeValue，
+      // 它在「只支持 WRITE」的特征上同样走 Write Request，不是无响应写
+      if (typeof ch.writeValueWithResponse === 'function') {
+        await ch.writeValueWithResponse(frame);
         return;
       }
-      await client.writeChar.writeValue(frame);
+      await ch.writeValue(frame);
     };
 
     /** 发送命令帧 */
@@ -496,24 +541,30 @@
     };
 
     /**
-     * 按 BLE_Protocol.md §5 分片写入一张图。
-     * 每片 233 字节（帧 244），offset 从 0 递增，写完一片必须等到该片的 DONE 再发下一片
-     * —— 天然流控，避免固件忙时回 BUSY 丢片。
+     * 按 BLE_Protocol.md §5 分片写入一张图（0x30）。
      *
-     * 单片的失败（典型是「GATT operation already in progress」或该片超时）会重发，
-     * 默认最多试 3 次；协议级错误（如「无效数据」）不重试，直接失败。
+     * 固件 074fc03 起，成功入队的分片不再回 DOING(0x01)，所以不能「等 DOING 再发下一包」
+     * —— 老写法现在会一直卡住。现在的确认方式：
+     *   ATT 写响应    = 已入队 → 收到就发下一片（发送节奏的唯一依据）；
+     *   DONE(0x02)   = 该片已写进 Flash → 只更新进度、最后确认落盘，不阻塞发送；
+     *   BUSY(0x03)   = 队列满、这一包被丢弃 → 用**同一个 offset** 重发；
+     *   E0~E7 / 0xFF = 协议错误，重发无意义，直接失败。
+     *
+     * 最后一片的写响应只代表入队，所以要等所有 DONE 到齐才算真正写完
+     * （等落盘用空闲超时：期间还有新 DONE 就一直等）。
      *
      * 调用前必须先 0x20 擦除同一个槽并确认成功（由页面负责编排）。
      *
      * @param {number} imageId 0~10
      * @param {Uint8Array} bytes 4bpp 图像数据，长度应为 172800
      * @param {object} [opts]
-     *   onProgress({index,count,offset,sent,total})  每片发出前回调
-     *   onRetry({index,attempt,error})  某一片重发前回调
+     *   onProgress({index,count,offset,sent,total,done,flashed})  每片入队后回调
+     *     sent = 已下发字节（ATT 已确认入队），flashed = 已确认落盘字节
+     *   onRetry({index,attempt,error})  某一片重发前回调（GATT 失败或 BUSY 丢包）
      *   shouldStop()  返回 true 则在下一片前中止
-     *   idleMs  单片的空闲超时，默认 5000
+     *   idleMs  等落盘的空闲超时，默认 5000
      *   attempts 单片最多尝试次数，默认 3
-     * @returns {Promise<{chunks:number, bytes:number}>}
+     * @returns {Promise<{chunks:number, bytes:number, retries:number}>}
      */
     client.writeImage = async function (imageId, bytes, opts) {
       const o = opts || {};
@@ -523,25 +574,122 @@
       }
       const count = Math.ceil(bytes.length / CHUNK_PAYLOAD);
       const attempts = o.attempts || 3;
+      const idleMs = o.idleMs || 5000;
+      const chunkAt = (i) => {
+        const offset = i * CHUNK_PAYLOAD;
+        const payload = bytes.subarray(offset, Math.min(offset + CHUNK_PAYLOAD, bytes.length));
+        return { index: i, offset, frame: buildImageChunkFrame(imageId, offset, payload) };
+      };
+
+      let sentCount = 0; // 拿到 ATT 写响应的次数（含重发）
+      let doneCount = 0; // 确认写进 Flash 的片数
+      let busyDropped = 0; // BUSY 丢掉的包数：它们不会再有 DONE，算完成时要扣掉
+      let acked = -1; // 最近一片拿到写响应的片号（BUSY 归因用）
+      let fatal = null; // 设备报的协议错误帧
+      let retries = 0;
+      const busyOffsets = []; // BUSY 丢包：按原 offset 重发
+
+      const prevFrame = h.onFrame;
+      h.onFrame = function (frame) {
+        if (prevFrame) prevFrame(frame);
+        if (frame.cmd !== CMD.WRITE_IMAGE) return;
+        if (frame.code === 0x02) {
+          doneCount++;
+          return;
+        }
+        if (frame.code === 0x03) {
+          // 队列满、这一包被丢弃：记下片号，稍后用同一个 offset 重发
+          busyDropped++;
+          if (acked >= 0 && busyOffsets.indexOf(acked) === -1) busyOffsets.push(acked);
+          return;
+        }
+        if (frame.code === 0x01) return; // 旧固件的 DOING：现在不用等，忽略
+        fatal = frame;
+      };
+
+      const protocolError = () => {
+        const code = fatal.code;
+        const err = new Error(client.responseText(code) + '（0x' + code.toString(16).toUpperCase() + '）');
+        err.responseCode = code;
+        err.retryable = false;
+        return err;
+      };
+
+      /** 发一片：ATT 写响应即「已入队」；BUSY 或 GATT 失败就地重发同一片 */
+      const sendChunk = async (i) => {
+        const chunk = chunkAt(i);
+        await withRetry(
+          async () => {
+            if (fatal) throw protocolError();
+            if (o.shouldStop && o.shouldStop()) throw new Error('已中止送图');
+            // 先把片号记上：BUSY 可能和写响应一起、甚至更早到达，归因不能等写完
+            acked = i;
+            await client.writeFrame(chunk.frame, { quiet: true });
+            sentCount++;
+            // 让与写响应同一批到达的 BUSY 先被处理，再判断这一包是不是被丢了
+            await yieldTask();
+            const droppedAt = busyOffsets.indexOf(i);
+            if (droppedAt !== -1) {
+              busyOffsets.splice(droppedAt, 1);
+              const err = new Error('设备忙（0x03）：这一包被丢弃');
+              err.retryable = true;
+              throw err;
+            }
+            if (o.onProgress) {
+              o.onProgress({
+                index: i,
+                count,
+                offset: chunk.offset,
+                sent: Math.min(sentCount * CHUNK_PAYLOAD, bytes.length),
+                flashed: Math.min(doneCount * CHUNK_PAYLOAD, bytes.length),
+                done: doneCount,
+                total: bytes.length,
+              });
+            }
+          },
+          attempts,
+          (info) => {
+            retries++;
+            if (o.onRetry) o.onRetry({ index: i, attempt: info.attempt, error: info.error });
+          }
+        );
+      };
+
       const silent = client.silentCmd;
-      client.silentCmd = CMD.WRITE_IMAGE; // 742 片不逐条写日志
+      client.silentCmd = CMD.WRITE_IMAGE; // 742 片 + 742 条 DONE 不逐条写日志
       try {
         for (let i = 0; i < count; i++) {
           if (o.shouldStop && o.shouldStop()) throw new Error('已中止送图');
-          const offset = i * CHUNK_PAYLOAD;
-          const payload = bytes.subarray(offset, Math.min(offset + CHUNK_PAYLOAD, bytes.length));
-          const frame = buildImageChunkFrame(imageId, offset, payload);
-          if (o.onProgress) o.onProgress({ index: i, count, offset, sent: offset + payload.length, total: bytes.length });
-          await withRetry(
-            () => client.sendFrameAndWait(frame, CMD.WRITE_IMAGE, o.idleMs || 5000, { quiet: true }),
-            attempts,
-            (info) => o.onRetry && o.onRetry({ index: i, attempt: info.attempt, error: info.error })
-          );
+          // 上一片迟到的 BUSY：先把丢掉的片按原 offset 补发
+          while (busyOffsets.length) await sendChunk(busyOffsets.shift());
+          await sendChunk(i);
         }
+
+        // 收尾：等所有 DONE 到齐才算落盘完成（这段不再发数据，只等通知）
+        const expected = () => sentCount - busyDropped;
+        let lastDone = doneCount;
+        let idleFrom = Date.now();
+        while (doneCount < expected() || busyOffsets.length) {
+          if (fatal) throw protocolError();
+          if (busyOffsets.length) {
+            await sendChunk(busyOffsets.shift());
+            idleFrom = Date.now();
+            continue;
+          }
+          if (doneCount !== lastDone) {
+            lastDone = doneCount;
+            idleFrom = Date.now();
+          } else if (Date.now() - idleFrom > idleMs) {
+            throw new Error('等待 Flash 落盘超时：已确认 ' + doneCount + ' / ' + expected() + ' 片（可重试）');
+          }
+          if (doneCount >= expected()) break;
+          await sleep(20);
+        }
+        return { chunks: count, bytes: bytes.length, retries };
       } finally {
         client.silentCmd = silent;
+        h.onFrame = prevFrame;
       }
-      return { chunks: count, bytes: bytes.length };
     };
 
     return client;
