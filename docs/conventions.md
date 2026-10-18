@@ -59,8 +59,9 @@ try { await client.xxx(); } catch (e) { ... } finally { busy = false; setCommand
   `writeValue()`），**不再用 `writeValueWithoutResponse()`**——固件 `fe1d988` 起 FFE3 只声明
   `GATT_PROP_WRITE`，无响应写会直接失败。连接后核对 `writeChar.properties.writeWithoutResponse`：
   为 `true` 说明设备还在跑旧固件，日志要明确提示「重新烧录后断开重连」。
-  244 字节的包需要 ATT MTU ≥ 247；Web Bluetooth 没有主动请求 MTU 的接口，只能依赖系统自动协商，
-  写入报长度错误时要明确提示 MTU 不足。
+  244 字节的包需要 ATT MTU ≥ 247；Web Bluetooth 没有主动请求 MTU 的接口，只能依赖系统自动协商
+  （串口日志里应看到 `mtu exchange: 247`；看到 23 说明实际还是 20 B/包，速度上不去）。
+  `writeFrame()` 对长帧写入失败会补一句「可能是 ATT MTU 不足」的提示，保留原始错误信息。
 - **742 片不逐条写日志**：`client.silentCmd` 让该 cmd 的收发静默，进度交给进度条；
   否则日志被冲掉、页面也会卡。
 - 送图期间同样 `setCommandLock(true)`，并提供「中止」（`shouldStop` 每片检查一次）。

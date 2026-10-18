@@ -478,6 +478,39 @@ console.log('BLE 组帧与解析自测');
   ok(res.chunks === 742 && res.retries === 1, '重发后仍按 742 片完成');
 }
 
+/* 21. 写长帧失败时补 MTU 提示（244 字节帧需要 MTU ≥ 247，浏览器没有读 MTU 的接口） */
+{
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  client.writeChar = {
+    writeValueWithResponse: async () => {
+      throw new Error('GATT Error: The write value length exceeds the maximum');
+    },
+  };
+  let msg = '';
+  try {
+    await client.writeFrame(B.buildImageChunkFrame(0, 0, new Uint8Array(233)), { quiet: true });
+  } catch (err) {
+    msg = err.message;
+  }
+  ok(/MTU ≥ 247/.test(msg), '长帧写失败时提示 ATT MTU 不足');
+  ok(/exceeds the maximum/.test(msg), '保留原始错误信息，便于排查');
+
+  client.writeChar = {
+    writeValueWithResponse: async () => {
+      throw new Error('GATT operation already in progress');
+    },
+  };
+  let short = '';
+  try {
+    await client.send(B.CMD.REVISION, [0x00]);
+  } catch (err) {
+    short = err.message;
+  }
+  ok(short === 'GATT operation already in progress', '短帧失败不加 MTU 提示');
+}
+
 if (fail.length) {
   console.error('\n失败 ' + fail.length + ' 项');
   process.exit(1);

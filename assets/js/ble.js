@@ -381,11 +381,25 @@
       const ch = client.writeChar;
       // 有 writeValueWithResponse 就显式用它；老浏览器只有 writeValue，
       // 它在「只支持 WRITE」的特征上同样走 Write Request，不是无响应写
-      if (typeof ch.writeValueWithResponse === 'function') {
-        await ch.writeValueWithResponse(frame);
-        return;
+      try {
+        if (typeof ch.writeValueWithResponse === 'function') {
+          await ch.writeValueWithResponse(frame);
+        } else {
+          await ch.writeValue(frame);
+        }
+      } catch (err) {
+        // 244 字节的帧要 ATT MTU ≥ 247；MTU 只有 23 时浏览器会直接拒绝长写。
+        // Web Bluetooth 没有读 MTU 的接口，只能按失败现象提示。
+        if (frame.length > 20 && !(err && err.mtuHinted)) {
+          const msg = (err && err.message) || String(err);
+          if (/length|size|mtu|exceed|invalid|not supported/i.test(msg)) {
+            err.message = msg + '（可能是 ATT MTU 不足：244 字节帧需要 MTU ≥ 247，浏览器应与设备协商到 247，' +
+              '串口日志里能看到 mtu exchange: 247）';
+            err.mtuHinted = true;
+          }
+        }
+        throw err;
       }
-      await ch.writeValue(frame);
     };
 
     /** 发送命令帧 */
