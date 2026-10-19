@@ -2,7 +2,7 @@
 
 面向 **E6 六色电子纸**（黑 / 白 / 黄 / 红 / 蓝 / 绿）的静态网页工具箱：图片抖动量化、4bpp 面板数据打包导出、独立的 BLE 设备命令测试页。
 
-纯静态站点，无后端、无构建步骤，推送到 `main` 自动部署到 GitHub Pages。
+纯静态站点，无后端、无构建步骤，推送到 `main` 自动部署到 GitHub Pages；支持 **PWA**，可安装到桌面 / 主屏幕并离线打开。
 
 ## 功能
 
@@ -95,14 +95,20 @@ EPD_Toolbox/
 ├── ble-console.html               # BLE 命令测试页
 ├── assets/
 │   ├── css/app.css                # 设计系统（跟随系统暗色）
+│   ├── icons/                     # PWA 图标（由 tools/make-icons.mjs 生成）
 │   └── js/
 │       ├── e6-codec.js            # 调色板 / 抖动 / 4bpp 打包（纯函数）
 │       ├── ble.js                 # Web Bluetooth 封装 + 命令帧
 │       ├── e6-page.js             # 图像页交互
-│       └── ble-console.js         # 命令测试页交互
+│       ├── ble-console.js         # 命令测试页交互
+│       └── pwa.js                 # PWA：注册 SW、安装按钮、刷新缓存
+├── manifest.webmanifest           # PWA 清单（名称 / 图标 / 快捷方式）
+├── sw.js                          # Service Worker（离线缓存）
+├── tools/make-icons.mjs           # 生成 PWA 图标（无依赖，node 直接跑）
 ├── docs/conventions.md            # 交互与通信约定（备忘录）
 ├── tests/codec.test.mjs           # 编解码自测（node 直接跑）
 ├── tests/ble.test.mjs             # BLE 组帧 / 拆帧 / 命令自测（node 直接跑）
+├── tests/pwa.test.mjs             # PWA 自测：manifest / PRECACHE / 页面接入
 └── .github/workflows/deploy-pages.yml
 ```
 
@@ -120,6 +126,7 @@ E6 面板像素为 **4 bit/像素**，两个像素拼一个字节：
 ```bash
 node tests/codec.test.mjs
 node tests/ble.test.mjs
+node tests/pwa.test.mjs
 ```
 
 ## BLE 协议
@@ -155,11 +162,43 @@ offset 大端、从 0 起每片 +233；最后一片 payload 147 字节、帧长 
 > 每收到一帧同 CMD 的响应就重置计时器（刷纯色 / 刷图 20 s、擦除 60 s、每片送图 5 s），心跳不断就一直等；
 > 连续这么久没有任何帧才判失败。相关逻辑见 `ble.js` 的 `sendAndWait()` / `sendFrameAndWait()`。
 
-> ⚠️ 解析时不能一律把 PAYLOAD 首字节当响应码：读版本应答的 `0x10` 是版本号第一个字节，
-> 不是「未知响应 0x10」。`ble.js` 里 `readRevision()` 单独实现，拿到 `CMD=0x00` 的帧即视为成功。
+> ⚠️ 解析时不能一律把 PAYLOAD 首字节当响应码：`0x00` 读版本的 `10` 是版本号第一个字节、
+> `0x01` 读温度的 `TS` 是原始值，都不是响应码。`readRevision()` / `readTemperature()` 单独实现，
+> 拿到对应 `CMD` 的帧即视为成功。
 
 > 存图 + 刷图链路（`0x20` 擦除 → `0x30` 写片 → `0x11` 刷图）已全通：
 > `0x11` 走固件 `EPD_TaskSubmit(EPD_MDOE_IMAGE, image_id)`，槽号非法回 `0xE7`，任务队列满回 `0x03`。
+
+## PWA（安装到桌面 / 离线打开）
+
+三个页面共用一套 PWA 能力：
+
+- `manifest.webmanifest`：名称、主题色、192/512 图标（含 maskable）、两个快捷方式；
+- `sw.js`：Service Worker，**导航网络优先**（改完刷新就能拿到新版）、静态资源缓存优先 + 后台更新；
+- `assets/js/pwa.js`：注册 SW、`beforeinstallprompt` 安装按钮、`controllerchange` 后提示「刷新缓存」。
+
+使用方式：
+
+| 平台 | 安装方式 |
+| --- | --- |
+| Chrome / Edge（桌面） | 地址栏右侧安装图标，或顶栏的「＋ 安装」按钮 |
+| Android Chrome | 地址栏菜单「安装应用」，或顶栏「＋ 安装」 |
+| iOS Safari | 分享 → 「添加到主屏幕」（Safari 不触发 `beforeinstallprompt`，没有安装按钮） |
+
+离线能力：页面、样式、脚本、图标都在 `sw.js` 的 `PRECACHE` 里，断网仍能打开并做图像处理；
+BLE 需要连设备，离线时只会有「不支持 Web Bluetooth」的提示。
+
+**发版注意**：改了 `sw.js` 的 `VERSION`（例如 `epd-toolbox-v2`）才会清旧缓存；
+新增/删除页面或 JS/CSS 时，必须同步 `PRECACHE` 清单（见 [docs/conventions.md](docs/conventions.md) §13）。
+SW 换新版本后页面顶栏会出现「⟳ 刷新缓存」按钮，点一下即可加载新版（手机上按不出 Ctrl+F5 时用它）。
+
+图标由脚本生成，改了设计后重跑：
+
+```bash
+node tools/make-icons.mjs   # 输出 assets/icons/*.png
+```
+
+PWA 安装要求 `https://` 或 `localhost`，`file://` 双击打开不会注册 SW。
 
 ## 本地预览
 

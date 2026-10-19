@@ -141,6 +141,7 @@ try { await client.xxx(); } catch (e) { ... } finally { busy = false; setCommand
 node --check assets/js/*.js
 node tests/codec.test.mjs
 node tests/ble.test.mjs
+node tests/pwa.test.mjs
 ```
 
 - 新增控件要挂进 `el` 映射，页面 id 与 JS 引用必须一一对应；
@@ -237,3 +238,31 @@ node tests/ble.test.mjs
   都是正常方向——用户看到什么就发什么；
 - 如果以后换了一块装法不同的屏，改的是固件的反转逻辑，不要退回页面加开关；
 - 自检里钉一条「codec 不提供 flipVIds」即可，防止有人把补偿又加回来。
+
+## 13. PWA：缓存清单、版本号与按钮语义
+
+三个页面共用 `manifest.webmanifest` + `sw.js` + `assets/js/pwa.js`，**不要在页面里各写一份**。
+
+- **新增/删除页面或静态资源必须同步 `sw.js` 的 `PRECACHE`**：
+  这是离线包的全部内容，漏一个文件就表现为「装了 PWA 之后某页打不开」。
+  自检里会核对 `PRECACHE` 里的路径是否都存在。
+- **改完静态资源要顺手把 `VERSION` 加一**（`epd-toolbox-v1` → `v2`）：
+  `install` 时会 `skipWaiting()`、`activate` 时删掉旧 cache，页面收到 `controllerchange`
+  后顶栏出现「⟳ 刷新缓存」按钮；不改版本号，老用户可能一直吃旧缓存。
+- **只缓存同源 GET**：跨域请求、非 GET 直接放行；导航用「网络优先 + 缓存兜底」，
+  这样改完页面刷新即见新版，断网还能打开；静态资源用「缓存优先 + 后台更新」。
+- **`[hidden]` 要能真的隐藏**：`.btn` 的 `display:inline-flex` 会覆盖浏览器默认的
+  `[hidden]{display:none}`，所以 `app.css` 里显式写了 `[hidden]{display:none !important}`。
+  安装 / 刷新缓存两个按钮默认带 `hidden`，由 `pwa.js` 控制显隐，**不要改成 CSS class 显示**。
+- **按钮位置与 id 固定**：顶栏 `.topbar-right` 里的 `#pwaInstallBtn`、`#btnRefreshCache`；
+  三个页面都必须有这两个按钮和 `<script src="assets/js/pwa.js">`，否则某页装不上 / 不提示更新。
+- **head 元信息三个页面保持一致**：`rel="manifest"`、`apple-touch-icon`、
+  `apple-mobile-web-app-*`、两套 `theme-color`（浅色 / 深色）。
+- **图标不要手改 PNG**：改设计就改 `tools/make-icons.mjs` 后重跑，产出 192 / 512 / maskable 512 /
+  apple-touch 180 四张，文件名与 `manifest.webmanifest` 的 `sizes` 必须对得上。
+- 自检（提交前）：
+
+  ```bash
+  node --check sw.js assets/js/pwa.js
+  node tests/pwa.test.mjs   # manifest / PRECACHE / 三页接入一次核对
+  ```
