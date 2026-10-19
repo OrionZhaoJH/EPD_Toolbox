@@ -267,6 +267,8 @@
     });
   });
 
+  // 分辨率下拉只保留 480×720（E6 面板）与「自定义」：选预设就回填宽高，
+  // 选自定义不动作，由下面的宽/高输入框自由改；改到非预设值时下拉自动切到「自定义」
   el.sizePreset.addEventListener('change', () => {
     const v = el.sizePreset.value;
     if (v !== 'custom') {
