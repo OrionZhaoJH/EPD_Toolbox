@@ -275,25 +275,6 @@
     return { ids, width: w, height: h, imageData: idsToImageData(ids, w, h), stats: stats(ids) };
   }
 
-  /**
-   * 上下翻转一组色号（打包前的最后一步）：面板装反了——屏上画面相对原图上下颠倒。
-   * 只换行不换列，(x, y) → (x, h-1-y)，左右方向不动。
-   * 作用在量化结果上，所以预览 / 抖动都保持正常方向，翻转只影响导出的数据。
-   * @param {Uint8Array|number[]} ids 行优先的色号数组（长度 = w*h）
-   * @param {number} w 宽
-   * @param {number} h 高
-   * @returns {Uint8Array} 翻转后的新数组（不修改入参）
-   */
-  function flipVIds(ids, w, h) {
-    const out = new Uint8Array(ids.length);
-    for (let y = 0; y < h; y++) {
-      const srcRow = (h - 1 - y) * w; // 倒着取行：上下翻转
-      const dstRow = y * w;
-      for (let x = 0; x < w; x++) out[dstRow + x] = ids[srcRow + x]; // 列不变
-    }
-    return out;
-  }
-
   /** 调色板索引数组 → 可直接绘制/导出的 ImageData */
   function idsToImageData(ids, w, h) {
     const out = new ImageData(w, h);
@@ -415,7 +396,6 @@
     drawFitted,
     preprocess,
     dither,
-    flipVIds,
     idsToImageData,
     pack,
     unpack,
