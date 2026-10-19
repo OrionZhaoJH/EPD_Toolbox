@@ -7,6 +7,13 @@
 <meta name="description" content="把任意图片抖动量化成 E6 六色（黑白黄红蓝绿），生成 480×720 4bpp 面板数据，支持导出 bin / C 数组并通过 BLE 控制设备刷屏。">
 <meta name="theme-color" content="#f5f7fa" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon-180.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="EPD Toolbox">
 <link rel="stylesheet" href="assets/css/app.css">
 </head>
 <body>
@@ -19,6 +26,9 @@
       <span class="topbar-title"><span class="icon">🖼️</span> E6 六色图像转换</span>
     </div>
     <div class="topbar-right">
+      <!-- PWA：安装按钮与「版本更新后刷新缓存」按钮，默认隐藏，由 assets/js/pwa.js 控制 -->
+      <button class="btn btn-sm btn-install" id="pwaInstallBtn" type="button" hidden title="安装到桌面 / 主屏幕">＋ 安装</button>
+      <button class="btn btn-sm" id="btnRefreshCache" type="button" hidden title="清除离线缓存并加载最新版本">⟳ 刷新缓存</button>
       <span class="badge off" id="bleState"><span class="badge-device" id="bleDeviceName"></span><span id="bleStateText">未连接</span></span>
       <button class="btn btn-primary btn-sm" id="btnConnect" type="button" title="连接 BLE 设备">
         <span class="btn-ico">🔗</span><span class="btn-label">连接 BLE</span>
@@ -265,5 +275,6 @@
 <script src="assets/js/e6-codec.js"></script>
 <script src="assets/js/ble.js"></script>
 <script src="assets/js/e6-page.js"></script>
+<script src="assets/js/pwa.js"></script>
 </body>
 </html>

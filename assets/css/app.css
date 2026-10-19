@@ -224,6 +224,14 @@ header.page-head p { color: var(--text-muted); margin-top: 6px; font-size: .92re
 .btn-sm { padding: 4px 12px; font-size: .78rem; }
 .btn-block { width: 100%; }
 
+/* PWA：安装按钮用强调色描边；「版本更新后刷新缓存」按钮同样走强调色
+   [hidden] 必须加 !important：.btn 的 display:inline-flex 会压过浏览器默认的
+   [hidden]{display:none}，否则默认隐藏的按钮会一直显示出来 */
+[hidden] { display: none !important; }
+.btn-install { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.btn-install:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.update-available { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
 /* --------------------------------------------------------------------------
    卡片
    -------------------------------------------------------------------------- */
