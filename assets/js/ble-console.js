@@ -43,6 +43,12 @@
     revState: $('revState'),
     revMs: $('revMs'),
 
+    btnTemp: $('btnTemp'),
+    tempFrame: $('tempFrame'),
+    tempResult: $('tempResult'),
+    tempState: $('tempState'),
+    tempMs: $('tempMs'),
+
     slotSelect: $('slotSelect'),
     btnErase: $('btnErase'),
     eraseFrame: $('eraseFrame'),
@@ -199,6 +205,7 @@
     const upSlot = Number(el.upSlotSelect.value) || 0;
     const imgSlot = Number(el.imgSlotSelect.value) || 0;
     el.revFrame.textContent = BLE.hex(BLE.buildFrame(CMD.REVISION, [0x00]));
+    el.tempFrame.textContent = BLE.hex(BLE.buildFrame(CMD.TEMPERATURE, [0x00]));
     el.colorFrame.textContent = BLE.hex(BLE.buildFrame(CMD.UPDATE_COLOR, [selectedColor]));
     el.eraseFrame.textContent = BLE.hex(BLE.buildFrame(CMD.FLASH_ERASE, [slot]));
     el.imgFrame.textContent = BLE.hex(BLE.buildFrame(CMD.UPDATE_IMAGE, [imgSlot]));
@@ -265,6 +272,7 @@
   function applyCommandEnabled() {
     const usable = !!client.connected && !locked;
     el.btnRev.disabled = !usable;
+    el.btnTemp.disabled = !usable;
     el.btnErase.disabled = !usable;
     el.btnUpdateImage.disabled = !usable;
     el.btnUploadTest.disabled = !usable;
@@ -371,6 +379,41 @@
     } finally {
       busy = false;
       setCommandLock(false); // 成功 / 失败 / 超时都解禁
+    }
+  });
+
+  /* ---------------- 0x01 读温度 ----------------
+     同步命令；应答同样没有响应码，PAYLOAD 就是 1 字节温度寄存器原值（TS[7:0]）。
+     换算走 BLE.decodeTemperature()：0x00~0x32 = 0~50 ℃、0xE7~0xFF = -25~-1 ℃，
+     其它编码超出规格，标「越界」但仍显示有符号解析值，方便排查读到的怪值。 */
+  el.btnTemp.addEventListener('click', async () => {
+    if (busy) return log('sys', '上一条命令还在执行，稍等');
+    busy = true;
+    setCommandLock(true);
+    setCmdState(el.tempState, 'running', '执行中…');
+    const t0 = performance.now();
+    try {
+      const frame = await client.readTemperature();
+      const ms = Math.round(performance.now() - t0);
+      const raw = frame.data.length ? frame.data[0] : 0;
+      const t = BLE.decodeTemperature(raw);
+      const rawHex = '0x' + raw.toString(16).padStart(2, '0').toUpperCase();
+      el.tempMs.textContent = ms + ' ms';
+      el.tempResult.textContent =
+        'TS[7:0]：' + rawHex + ' → ' + t.celsius + ' ℃' +
+        (t.valid ? '' : '（越界：规格 -25~50 ℃）');
+      setCmdState(el.tempState, t.valid ? 'ok' : 'err', t.valid ? t.celsius + ' ℃' : '越界');
+      if (t.valid) log('ok', '读温度成功：' + rawHex + ' → ' + t.celsius + ' ℃（' + ms + ' ms）');
+      else log('err', '读温度越界：' + rawHex + ' → ' + t.celsius + ' ℃（规格 -25~50 ℃）');
+    } catch (err) {
+      const ms = Math.round(performance.now() - t0);
+      el.tempMs.textContent = ms + ' ms';
+      el.tempResult.textContent = '失败：' + err.message;
+      setCmdState(el.tempState, 'err', '失败');
+      log('err', '读温度失败：' + err.message);
+    } finally {
+      busy = false;
+      setCommandLock(false);
     }
   });
 
@@ -602,6 +645,6 @@
     el.btnConnect.disabled = true;
     log('sys', '当前浏览器不支持 Web Bluetooth，仅能查看发送帧');
   } else {
-    log('sys', '命令测试页就绪：0x00 读版本 / 0x10 刷纯色 / 0x11 刷图 / 0x20 擦除图片槽 / 0x30 测试送图');
+    log('sys', '命令测试页就绪：0x00 读版本 / 0x01 读温度 / 0x10 刷纯色 / 0x11 刷图 / 0x20 擦除图片槽 / 0x30 测试送图');
   }
 })();

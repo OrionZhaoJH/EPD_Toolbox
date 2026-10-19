@@ -76,21 +76,32 @@
   </section>
 
   <div class="grid-2 align-stretch">
-    <!-- ============ 第一行：0x00 读版本 / 0x10 刷纯色 ============ -->
+    <!-- ============ 第一行：0x00 / 0x01 读取 IC 信息 · 0x10 刷纯色 ============ -->
     <div class="col">
 
-      <!-- ============ 0x00 · 读 IC 版本 ============
-           同步命令：发送 55 AA 00 08 00 00 00 0D，应答没有响应码，PAYLOAD 就是 3 字节版本号。
-           控件：按钮 #btnRev，状态 #revState，耗时 #revMs，发送帧 #revFrame，结果 #revResult。
-           结果框只放版本号本身，完整响应帧看底部收发日志；逻辑见 ble-console.js「0x00 读版本」段。 -->
+      <!-- ============ 0x00 / 0x01 · 读取 IC 信息 ============
+           两条同步命令，应答都**没有响应码**，PAYLOAD 就是数据本身：
+           0x00 读版本：请求 55 AA 00 08 00 00 00 0D
+                       应答 55 AA 00 0A 00 R1 R2 R3 00 0D（长度 0x0A，3 字节版本号）
+           0x01 读温度：请求 55 AA 00 08 01 00 00 0D
+                       应答 55 AA 00 08 01 TS 00 0D（长度 0x08，1 字节温度寄存器原值）
+                       TS 为 8 位有符号：0x00~0x32 = 0~50 ℃，0xE7~0xFF = -25~-1 ℃；
+                       其它编码超出规格（valid=false），页面标「越界」但仍显示有符号解析值。
+                       换算在 ble.js 的 decodeTemperature()，命令在 readTemperature()。
+           控件：#btnRev / #revState / #revMs / #revResult（版本）
+                #btnTemp / #tempState / #tempMs / #tempResult（温度）
+           结果框只放数据本身，完整响应帧看底部收发日志（onNotify 逐帧 log rx）。 -->
       <section class="card">
         <div class="card-title">
-          <span>0x00 · 读 IC 版本</span>
-          <span class="sub">CHAR3_CMD_00_REVISION</span>
+          <span>0x00 / 0x01 · 读取 IC 信息</span>
+          <span class="sub">REVISION · TEMPERATURE</span>
         </div>
         <p class="hint">
-          读回面板驱动 IC 的版本号。应答没有响应码，PAYLOAD 直接就是 3 字节版本号
-          （如 <code class="mono">10 84 02</code>）；完整响应帧记在页面底部的收发日志里。
+          两条同步命令都是「发一帧、等一帧通知」，应答没有响应码，PAYLOAD 直接是数据：
+          版本号 3 字节（如 <code class="mono">10 84 02</code>）；
+          温度是 1 字节原始值，<code class="mono">0x00~0x32</code> = 0~50 ℃、
+          <code class="mono">0xE7~0xFF</code> = -25~-1 ℃（8 位有符号），
+          超出 <b>-25 ~ 50 ℃</b> 的编码会标「越界」。
         </p>
 
         <div class="row" style="margin-top:12px;">
@@ -99,9 +110,19 @@
           <span class="spacer"></span>
           <span class="kv">耗时 <b id="revMs">—</b></span>
         </div>
-
-        <div class="frame-line">发送帧 <code class="mono" id="revFrame">—</code></div>
+        <div class="frame-line">版本帧 <code class="mono" id="revFrame">—</code></div>
         <div class="result-box mono" id="revResult">版本号会显示在这里</div>
+
+        <div class="divider"></div>
+
+        <div class="row">
+          <button class="btn btn-primary" id="btnTemp" type="button" disabled>读取温度</button>
+          <span class="badge off" id="tempState">未执行</span>
+          <span class="spacer"></span>
+          <span class="kv">耗时 <b id="tempMs">—</b></span>
+        </div>
+        <div class="frame-line">温度帧 <code class="mono" id="tempFrame">—</code></div>
+        <div class="result-box mono" id="tempResult">温度会显示在这里</div>
       </section>
     </div>
 
