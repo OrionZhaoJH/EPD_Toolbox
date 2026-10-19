@@ -288,6 +288,8 @@
     })
   );
 
+  // 「重置参数」只复位亮度 / 对比度 / 抖动强度这三项调图参数，
+  // 算法、尺寸适配、目标分辨率、蛇形扫描、槽位等选择保持用户当前设置不动
   el.btnReset.addEventListener('click', () => {
     el.brightness.value = '0';
     el.contrast.value = '0';
@@ -295,14 +297,7 @@
     el.brightnessVal.textContent = '0';
     el.contrastVal.textContent = '0';
     el.strengthVal.textContent = '100%';
-    el.algo.value = 'floydSteinberg';
-    el.fitMode.value = 'contain';
-    el.serpentine.checked = true;
-    el.sizePreset.value = '480x720';
-    el.imgW.value = '480';
-    el.imgH.value = '720';
-    updateSizeHint();
-    log('sys', '参数已重置');
+    log('sys', '已重置亮度 / 对比度 / 抖动强度');
     scheduleAuto();
   });
 

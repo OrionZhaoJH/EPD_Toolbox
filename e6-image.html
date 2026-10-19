@@ -133,7 +133,8 @@
 
         <div class="row" style="margin-top:16px;">
           <button class="btn btn-primary" id="btnConvert" type="button" disabled>转换</button>
-          <button class="btn" id="btnReset" type="button">重置参数</button>
+          <!-- 只复位亮度 / 对比度 / 抖动强度；算法、尺寸适配、分辨率、蛇形、槽位保持不变 -->
+          <button class="btn" id="btnReset" type="button" title="只重置亮度 / 对比度 / 抖动强度">重置参数</button>
           <span class="spacer"></span>
           <span class="badge off" id="convertState">等待图片</span>
         </div>
