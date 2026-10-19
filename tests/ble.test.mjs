@@ -100,6 +100,55 @@ console.log('BLE 组帧与解析自测');
   if (result.ok) ok(B.hex(result.f.data) === '10 84 02', 'resolve 的 data 就是 10 84 02');
 }
 
+/* 6.1 温度换算：规格表 -25~50 ℃ 的边界与越界 */
+{
+  const cases = [
+    [0x00, 0, true, '0x00 → 0 ℃'],
+    [0x14, 20, true, '0x14 → 20 ℃'],
+    [0x32, 50, true, '0x32 → 50 ℃（正向上限）'],
+    [0x33, 51, false, '0x33 → 51 ℃ 越界'],
+    [0xe7, -25, true, '0xE7 → -25 ℃（负向下限）'],
+    [0xff, -1, true, '0xFF → -1 ℃'],
+    [0xe6, -26, false, '0xE6 → -26 ℃ 越界'],
+    [0x80, -128, false, '0x80 → -128 ℃ 越界'],
+  ];
+  let pass = true;
+  for (const [raw, celsius, valid, label] of cases) {
+    const t = B.decodeTemperature(raw);
+    if (t.celsius !== celsius || t.valid !== valid) {
+      pass = false;
+      console.error('    ' + label + ' 实际 ' + JSON.stringify(t));
+    }
+  }
+  ok(pass, 'decodeTemperature 覆盖 0 / 20 / 50 / 51 / -25 / -1 / -26 / -128');
+  ok(B.decodeTemperature(0x1ff).raw === 0xff, 'decodeTemperature 只取低 8 位');
+}
+
+/* 6.2 readTemperature：应答 55 AA 00 08 01 TS 00 0D，PAYLOAD 即原始值 */
+{
+  const handlers = { onLog() {}, onStatus() {}, onFrame() {} };
+  const client = B.create(handlers);
+  client.connected = true;
+  client.writeChar = { writeValue: async () => {} };
+
+  const pending = client.readTemperature(500);
+  const rx = [0x55, 0xaa, 0x00, 0x08, 0x01, 0xe7, 0x00, 0x0d];
+  B.parseStream(rx, (f) => handlers.onFrame(f));
+
+  const result = await pending.then(
+    (f) => ({ ok: true, f }),
+    (e) => ({ ok: false, e })
+  );
+  ok(result.ok, 'readTemperature 正常 resolve');
+  if (result.ok) {
+    ok(result.f.cmd === 0x01 && result.f.data[0] === 0xe7, 'CMD=0x01、PAYLOAD[0]=0xE7');
+    ok(B.decodeTemperature(result.f.data[0]).celsius === -25, '0xE7 换算为 -25 ℃');
+  }
+}
+
+/* 6.3 发送帧：读温度请求 = 55 AA 00 08 01 00 00 0D */
+ok(B.hex(B.buildFrame(B.CMD.TEMPERATURE, [0x00])) === '55 AA 00 08 01 00 00 0D', '读温度请求帧 = 55 AA 00 08 01 00 00 0D');
+
 /* 7. readRevision 超时 */
 {
   const handlers = { onLog() {}, onStatus() {}, onFrame() {} };

@@ -23,6 +23,9 @@
    命令码（CHAR3_CMD_t）：
      0x00 读 IC 版本     55 AA 00 08 00 00 00 0D
                          → 应答 55 AA 00 0A 00 R1 R2 R3 00 0D（无响应码，PAYLOAD 即版本号）
+     0x01 读 IC 温度     55 AA 00 08 01 00 00 0D
+                         → 应答 55 AA 00 08 01 TS 00 0D（无响应码，TS 为 8 位有符号原始值，
+                           decodeTemperature() 换算：0x00~0x32 = 0~50℃，0xE7~0xFF = -25~-1℃）
      0x10 刷纯色         data[0] = 颜色编号 0~7
      0x11 刷图           55 AA 00 08 11 [image_id] 00 0D
                          → 把指定槽里已写入的图显示到屏上（先 0x20 擦 + 0x30 写）
@@ -31,7 +34,7 @@
                          见 E6_P370_CH592F/BLE_Protocol.md，742 片存一张 480×720 4bpp 图
    响应码（RESPONSE_CODE_t，仅 0x10 / 0x11 / 0x20 / 0x30 这类带状态应答的命令使用）：
      0x00 成功 / 0x01 受理中(DOING) / 0x02 完成(DONE) / 0x03 忙 / 0xE0+ 各类错误
-   注意：解析帧时不能一律把 PAYLOAD 首字节当响应码，读版本的应答首字节是版本号。
+   注意：解析帧时不能一律把 PAYLOAD 首字节当响应码，0x00 / 0x01 的应答首字节是数据本身。
    另注：固件 peripheralEPDTaskCB() 推送刷屏进度/完成通知时 CMD 字段写死为 0x10，
          所以等 0x11 的应答必须把 CMD=0x10 的帧一起算（见 updateImage / acceptCmds）。
    ========================================================================== */
@@ -44,6 +47,7 @@
 
   const CMD = {
     REVISION: 0x00,
+    TEMPERATURE: 0x01,
     UPDATE_COLOR: 0x10,
     UPDATE_IMAGE: 0x11,
     FLASH_ERASE: 0x20,
@@ -135,6 +139,21 @@
       }
     }
     throw lastErr;
+  }
+
+  /**
+   * 把 IC 温度寄存器的原始字节（TS[7:0]，8 位有符号）换算成摄氏度。
+   * 规格表 -25 ~ 50 ℃：
+   *   0x00 ~ 0x32 → 0 ~ 50 ℃
+   *   0xE7 ~ 0xFF → -25 ~ -1 ℃
+   *   0x33 ~ 0xE6 → 超出规格，valid=false；仍按有符号给出解析值，方便排查读到的怪值。
+   * @param {number} code 寄存器原始值（低 8 位有效）
+   * @returns {{raw:number, signed:number, celsius:number, valid:boolean}}
+   */
+  function decodeTemperature(code) {
+    const raw = code & 0xff;
+    const signed = raw & 0x80 ? raw - 256 : raw;
+    return { raw, signed, celsius: signed, valid: signed >= -25 && signed <= 50 };
   }
 
   /** 十六进制字符串 → 期望的 16 位 UUID 形式（蓝牙标准写法 0000xxxx-0000-1000-8000-00805f9b34fb 可省略） */
@@ -350,6 +369,7 @@
     client.cmdName = function (cmd) {
       switch (cmd) {
         case CMD.REVISION: return '读版本';
+        case CMD.TEMPERATURE: return '读温度';
         case CMD.UPDATE_COLOR: return '刷纯色';
         case CMD.UPDATE_IMAGE: return '刷图';
         case CMD.FLASH_ERASE: return '擦除图片槽';
@@ -482,12 +502,11 @@
     };
 
     /**
-     * 读 IC 版本。
-     * 固件对 0x00 的应答**没有响应码**：55 AA 00 0A 00 R1 R2 R3 00 0D，
-     * PAYLOAD 直接就是 3 字节版本号，所以不能走 sendAndWait（那会把 R1 当响应码，
-     * 实测会报「未知响应 0x10」，而 0x10 其实正是版本号的第一个字节）。
+     * 读类命令的通用实现：发一帧「无参数」请求，等 CMD 匹配的通知，直接返回整帧。
+     * 0x00 / 0x01 这类命令的应答 PAYLOAD 是「数据本身」而不是响应码，
+     * 所以不能走 sendAndWait（它只认 0x00/0x02 作为成功）。
      */
-    client.readRevision = function (timeout) {
+    function readDataResponse(cmd, timeout, label) {
       return new Promise((resolve, reject) => {
         const prev = h.onFrame;
         const finish = (fn, arg) => {
@@ -496,16 +515,36 @@
           fn(arg);
         };
         const timer = setTimeout(
-          () => finish(reject, new Error('等待响应超时（读版本）')),
+          () => finish(reject, new Error('等待响应超时（' + label + '）')),
           timeout || 3000
         );
         h.onFrame = function (frame) {
           if (prev) prev(frame);
-          if (frame.cmd !== CMD.REVISION) return;
+          if (frame.cmd !== cmd) return;
           finish(resolve, frame);
         };
-        client.send(CMD.REVISION, [0x00]).catch((err) => finish(reject, err));
+        client.send(cmd, [0x00]).catch((err) => finish(reject, err));
       });
+    }
+
+    /**
+     * 读 IC 版本。
+     * 固件对 0x00 的应答**没有响应码**：55 AA 00 0A 00 R1 R2 R3 00 0D，
+     * PAYLOAD 直接就是 3 字节版本号，所以不能走 sendAndWait（那会把 R1 当响应码，
+     * 实测会报「未知响应 0x10」，而 0x10 其实正是版本号的第一个字节）。
+     */
+    client.readRevision = function (timeout) {
+      return readDataResponse(CMD.REVISION, timeout, '读版本');
+    };
+
+    /**
+     * 读 IC 温度。
+     * 请求 55 AA 00 08 01 00 00 0D
+     * 应答 55 AA 00 08 01 TS 00 0D —— 同样**没有响应码**，PAYLOAD 就是 1 字节原始值，
+     * 转换交给 decodeTemperature()（8 位有符号：0x00~0x32 = 0~50℃，0xE7~0xFF = -25~-1℃）。
+     */
+    client.readTemperature = function (timeout) {
+      return readDataResponse(CMD.TEMPERATURE, timeout, '读温度');
     };
 
     client.updateColor = function (colorId, idleMs) {
@@ -714,6 +753,7 @@
     buildFrame,
     buildImageChunkFrame,
     parseStream,
+    decodeTemperature,
     toUuid,
     hex,
     CMD,
