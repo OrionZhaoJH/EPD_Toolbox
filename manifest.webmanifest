@@ -1,0 +1,48 @@
+{
+  "name": "EPD Toolbox · 电子纸调试工具箱",
+  "short_name": "EPD Toolbox",
+  "description": "E6 六色电子纸调试工具箱：图片抖动量化、4bpp 打包导出、BLE 命令测试与送图。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f5f7fa",
+  "theme_color": "#3b82f6",
+  "categories": ["utilities", "developer"],
+  "icons": [
+    {
+      "src": "assets/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "E6 图像转换",
+      "short_name": "图像",
+      "url": "e6-image.html",
+      "icons": [{ "src": "assets/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "BLE 命令测试",
+      "short_name": "命令",
+      "url": "ble-console.html",
+      "icons": [{ "src": "assets/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
