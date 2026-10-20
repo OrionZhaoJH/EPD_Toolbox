@@ -39,8 +39,8 @@ const PRECACHE = [
 /** 会随发版变化的「代码资源」：必须网络优先，避免旧 HTML 配旧脚本 */
 const CODE_ASSET = /\.(?:js|css)$/i;
 
-/** 网络优先 + 缓存兜底：在线永远拿最新，离线才吃缓存 */
-async function networkFirst(request, cacheKey) {
+/** 网络优先 + 缓存兜底：在线永远拿最新，离线才吃缓存；fallbackUrl 用于导航兜底到首页 */
+async function networkFirst(request, cacheKey, fallbackUrl) {
   const cache = await caches.open(VERSION);
   try {
     const response = await fetch(request);
@@ -50,7 +50,9 @@ async function networkFirst(request, cacheKey) {
     const cached =
       (await cache.match(cacheKey || request, { ignoreSearch: true })) ||
       (await cache.match(request, { ignoreSearch: true }));
-    return cached || Response.error();
+    if (cached) return cached;
+    if (fallbackUrl) return (await cache.match(fallbackUrl)) || Response.error();
+    return Response.error();
   }
 }
 
@@ -95,14 +97,9 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return; // 跨域不接管
 
   if (request.mode === 'navigate') {
-    // 用「路径」作缓存键，忽略 ?demo=1 这类查询串；再不行回退首页
+    // 用「路径」作缓存键，忽略 ?demo=1 这类查询串；连缓存都没有时回退首页
     const key = new Request(url.origin + url.pathname);
-    event.respondWith(
-      networkFirst(request, key).catch(async () => {
-        const cache = await caches.open(VERSION);
-        return (await cache.match('./index.html')) || Response.error();
-      })
-    );
+    event.respondWith(networkFirst(request, key, './index.html'));
     return;
   }
 
