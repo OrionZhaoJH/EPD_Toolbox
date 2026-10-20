@@ -253,11 +253,18 @@ node tests/pwa.test.mjs
 - **新增/删除页面或静态资源必须同步 `sw.js` 的 `PRECACHE`**：
   这是离线包的全部内容，漏一个文件就表现为「装了 PWA 之后某页打不开」。
   自检里会核对 `PRECACHE` 里的路径是否都存在。
-- **改完静态资源要顺手把 `VERSION` 加一**（`epd-toolbox-v1` → `v2`）：
+- **改完静态资源要顺手把 `VERSION` 加一**（`epd-toolbox-v2` → `v3`）：
   `install` 时会 `skipWaiting()`、`activate` 时删掉旧 cache，页面收到 `controllerchange`
   后顶栏出现「⟳ 刷新缓存」按钮；不改版本号，老用户可能一直吃旧缓存。
-- **只缓存同源 GET**：跨域请求、非 GET 直接放行；导航用「网络优先 + 缓存兜底」，
-  这样改完页面刷新即见新版，断网还能打开；静态资源用「缓存优先 + 后台更新」。
+- **只缓存同源 GET**：跨域请求、非 GET 直接放行。
+  导航与 **JS / CSS 一律网络优先**（`CODE_ASSET` 判定），断网才回退缓存；
+  只有图标、manifest 这类几乎不动的用「缓存优先 + 后台更新」。
+  不要退回「脚本缓存优先」：发版后会出现 HTML 新、脚本旧的混搭，
+  典型症状是**色板下拉空白 / 要刷新几次才正常**（v1 踩过，v2 改掉）。
+- **页面要能自证「脚本是新的」**：`e6-image.html` 末尾有一段内联自检，
+  `load` 时若 `#paletteSelect` 还是空的，就亮出「⟳ 刷新缓存」并提示「脚本版本过旧」；
+  `e6-page.js` 启动前也会校验 `Codec.PALETTES / getPalette / PALETTE_IDS`，
+  缺了就提示刷新而不是抛错留一个半截页面。新增依赖 codec 新 API 的页面照这个做法加兜底。
 - **`[hidden]` 要能真的隐藏**：`.btn` 的 `display:inline-flex` 会覆盖浏览器默认的
   `[hidden]{display:none}`，所以 `app.css` 里显式写了 `[hidden]{display:none !important}`。
   安装 / 刷新缓存两个按钮默认带 `hidden`，由 `pwa.js` 控制显隐，**不要改成 CSS class 显示**。
