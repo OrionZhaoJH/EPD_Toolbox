@@ -309,6 +309,20 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 /* 槽位下拉：选项只有「槽 0~10」，按内容给窄宽度，不要被 form-group 拉满 */
 select.slot-select { width: 104px; }
 
+/* 色板预览：当前色板的 6 个目标色 + hex，跟着色板下拉切换 */
+.palette-preview { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.palette-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: .66rem;
+  line-height: 1.2;
+  color: var(--text-light);
+  font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+}
+.palette-chip i { display: block; width: 44px; height: 22px; border-radius: 5px; border: 1px solid var(--border-strong); }
+
 /* 分段选择器 */
 .segmented { display: inline-flex; border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; }
 .segmented button {

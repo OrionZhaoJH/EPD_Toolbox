@@ -110,6 +110,16 @@
           </div>
         </div>
 
+        <!-- 六色色板：只决定「量化时往哪 6 个 RGB 上靠」，写进像素的设备 id 不变。
+             选项由 assets/js/e6-codec.js 的 PALETTES 生成，新增色板不用改这里。 -->
+        <div class="form-row" style="margin-top:12px;">
+          <div class="form-group" style="flex:1 1 220px;">
+            <label for="paletteSelect">六色色板</label>
+            <select id="paletteSelect"></select>
+          </div>
+        </div>
+        <div class="palette-preview" id="palettePreview"></div>
+
         <div class="form-row" style="margin-top:12px;">
           <div class="form-group">
             <label for="algo">抖动算法</label>

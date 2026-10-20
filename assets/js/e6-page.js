@@ -33,6 +33,8 @@
     imgH: $('imgH'),
     bytesPreview: $('bytesPreview'),
     algo: $('algo'),
+    paletteSelect: $('paletteSelect'),
+    palettePreview: $('palettePreview'),
     serpentine: $('serpentine'),
     nameFilter: $('nameFilter'),
     brightness: $('brightness'),
@@ -194,7 +196,37 @@
       el.algo.appendChild(opt);
     });
     el.algo.value = 'floydSteinberg';
+
+    // 色板选项直接由 Codec.PALETTES 生成，新增色板只改 codec，不用动页面
+    Object.keys(Codec.PALETTES).forEach((key) => {
+      const palette = Codec.PALETTES[key];
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = palette.name;
+      el.paletteSelect.appendChild(opt);
+    });
+    el.paletteSelect.value = Codec.DEFAULT_PALETTE_KEY;
+    renderPalette();
+
     updateSizeHint();
+  }
+
+  /** 画当前色板的 6 个色块 + hex（只影响量化目标，设备 id 不变） */
+  function renderPalette() {
+    const palette = Codec.getPalette(el.paletteSelect.value);
+    el.palettePreview.innerHTML = '';
+    palette.colors.forEach((c) => {
+      const chip = document.createElement('span');
+      chip.className = 'palette-chip';
+      chip.title = c.name + '（设备 id ' + c.id + '）';
+      const swatch = document.createElement('i');
+      swatch.style.background = c.hex;
+      const label = document.createElement('span');
+      label.textContent = c.hex.replace('#', '').toUpperCase();
+      chip.appendChild(swatch);
+      chip.appendChild(label);
+      el.palettePreview.appendChild(chip);
+    });
   }
 
   function updateSizeHint() {
@@ -257,6 +289,14 @@
   el.algo.addEventListener('change', scheduleAuto);
   el.serpentine.addEventListener('change', scheduleAuto);
   el.fitMode.addEventListener('change', scheduleAuto);
+
+  // 换色板 = 换量化的目标颜色，需要重算；设备 id 不变（黑0 白1 黄2 红3 蓝5 绿6）
+  el.paletteSelect.addEventListener('change', () => {
+    const palette = Codec.getPalette(el.paletteSelect.value);
+    renderPalette();
+    log('sys', '已切换色板：' + palette.name + '（' + palette.colors.map((c) => c.hex).join(' ') + '）');
+    scheduleAuto();
+  });
 
   [el.brightness, el.contrast, el.strength].forEach((input) => {
     input.addEventListener('input', () => {
@@ -329,6 +369,7 @@
 
         const res = Codec.dither(drawn, {
           algo: el.algo.value,
+          palette: el.paletteSelect.value, // 实际选中的色板决定量化目标
           brightness: parseInt(el.brightness.value, 10),
           contrast: parseInt(el.contrast.value, 10),
           strength: parseInt(el.strength.value, 10) / 100,
