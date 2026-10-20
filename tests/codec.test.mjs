@@ -97,6 +97,68 @@ ok(C.frameBytes(480, 719) === 480 * 360, '奇数高度向上取整');
   ok(allOk, '六色编号 黑0 白1 黄2 红3 蓝5 绿6');
 }
 
+/* 3.1 两套色板：都映射到同一组设备 id，只有 RGB 不同 */
+{
+  const keys = Object.keys(C.PALETTES);
+  ok(keys.length >= 2, '至少有两套色板（当前 ' + keys.join(' / ') + '）');
+  ok(C.PALETTE_IDS.join(',') === '0,1,2,3,5,6', '设备 id 序列 = 0,1,2,3,5,6');
+
+  let idsOk = true;
+  for (const key of keys) {
+    const colors = C.PALETTES[key].colors;
+    if (colors.length !== 6) idsOk = false;
+    colors.forEach((c, i) => {
+      if (c.id !== C.PALETTE_IDS[i]) idsOk = false;
+    });
+  }
+  ok(idsOk, '每套色板 6 色，且 id 与 PALETTE_IDS 一一对应');
+
+  const alt = C.getPalette('e6alt');
+  ok(
+    alt.colors.map((c) => c.hex).join(' ') === '#000008 #efffff #ffd700 #860000 #001c8a #145d14',
+    '深色板颜色 = 000008 / EFFFFF / FFD700 / 860000 / 001C8A / 145D14'
+  );
+  ok(C.getPalette('不存在的 key').key === C.DEFAULT_PALETTE_KEY, '未知色板 key 回退到默认色板');
+}
+
+/* 3.2 抖动按实际选中的色板算：往新色板的红/黑上靠，打包 id 不变 */
+{
+  const w = 8;
+  const h = 8;
+  const solid = (r, g, b) => {
+    const img = new FakeImageData(w, h);
+    for (let i = 0; i < img.data.length; i += 4) {
+      img.data[i] = r;
+      img.data[i + 1] = g;
+      img.data[i + 2] = b;
+      img.data[i + 3] = 255;
+    }
+    return img;
+  };
+
+  const red = C.dither(solid(0x86, 0x00, 0x00), { algo: 'threshold', palette: 'e6alt' });
+  ok(red.ids.every((v) => v === 3), '深色板下 #860000 量化成红（索引 3）');
+  ok(C.pack(red.ids, w, h).every((b) => b === 0x33), '红色打包后每字节 0x33（设备 id 3）');
+
+  const black = C.dither(solid(0x00, 0x00, 0x08), { algo: 'threshold', palette: 'e6alt' });
+  ok(black.ids.every((v) => v === 0), '深色板下 #000008 量化成黑（索引 0）');
+
+  // 同一张图在标准色板下会落到别的索引，证明选板确实生效
+  const redStd = C.dither(solid(0x86, 0x00, 0x00), { algo: 'threshold', palette: 'e6' });
+  ok(redStd.ids.every((v) => v === 3), '标准色板下 #860000 也判为红（两个色板的红都够近）');
+
+  // 预览 / 统计用所选色板的 RGB 与 hex
+  const px = red.imageData;
+  ok(px.data[0] === 0x86 && px.data[1] === 0x00 && px.data[2] === 0x00, '预览像素用深色板的红 #860000');
+  ok(red.stats[3].hex === '#860000', '颜色统计显示深色板的红色 hex');
+
+  // 打包结果与色板无关：同一组索引打出的字节固定是 55（设备 id 5 = 蓝）
+  const ids = new Uint16Array(w * h).fill(4);
+  const packed = C.pack(ids, w, h);
+  ok(packed.length === C.frameBytes(w, h) && packed[0] === 0x55 && packed[packed.length - 1] === 0x55, '相同索引的打包结果与色板无关（蓝 = 0x55）');
+}
+
+
 /* 4. 抖动主流程 + 大面积纯色识别 */
 {
   const w = 32;

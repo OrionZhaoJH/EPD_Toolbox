@@ -14,18 +14,59 @@
 (function (global) {
   'use strict';
 
-  /** E6 面板支持的 6 种颜色，数组下标即调色板索引，id 才是写进像素的值 */
-  const PALETTE = [
-    { index: 0, id: 0, name: '黑', hex: '#000000', rgb: [0, 0, 0] },
-    { index: 1, id: 1, name: '白', hex: '#ffffff', rgb: [255, 255, 255] },
-    { index: 2, id: 2, name: '黄', hex: '#ffe600', rgb: [255, 230, 0] },
-    { index: 3, id: 3, name: '红', hex: '#e8332a', rgb: [232, 51, 42] },
-    { index: 4, id: 5, name: '蓝', hex: '#1b57c4', rgb: [27, 87, 196] },
-    { index: 5, id: 6, name: '绿', hex: '#1f9d55', rgb: [31, 157, 85] },
-  ];
+  /**
+   * 设备颜色编号（写进 4bpp 半字节的值）。6 个调色板索引依次对应这 6 个 id，
+   * 4 / 7 是保留值，任何色板都不使用。
+   * 色板（palette）只决定「量化时把哪个 RGB 当目标」，写进像素的 id 始终是这 6 个。
+   */
+  const PALETTE_IDS = [0, 1, 2, 3, 5, 6];
 
-  /** id → 调色板项（4、7 为保留位，返回 null） */
-  const BY_ID = new Map(PALETTE.map((c) => [c.id, c]));
+  /** 色块名称固定对应设备的 6 种颜色 */
+  const PALETTE_NAMES = ['黑', '白', '黄', '红', '蓝', '绿'];
+
+  /** "#rrggbb" 字符串 → 调色板项数组（index 是调色板下标，id 是写进像素的值） */
+  function buildColors(hexes) {
+    return hexes.map((hex, index) => {
+      const h = hex.replace('#', '').toLowerCase();
+      return {
+        index,
+        id: PALETTE_IDS[index],
+        name: PALETTE_NAMES[index],
+        hex: '#' + h,
+        rgb: [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)],
+      };
+    });
+  }
+
+  /**
+   * 可用色板：量化时用的 6 个目标 RGB。
+   * 换色板只改「抖动往哪个颜色上靠」，打包格式与设备 id 不变。
+   */
+  const PALETTES = {
+    e6: {
+      key: 'e6',
+      name: 'E6 标准色',
+      colors: buildColors(['000000', 'ffffff', 'ffe600', 'e8332a', '1b57c4', '1f9d55']),
+    },
+    e6alt: {
+      key: 'e6alt',
+      name: 'E6 深色板',
+      colors: buildColors(['000008', 'efffff', 'ffd700', '860000', '001c8a', '145d14']),
+    },
+  };
+
+  const DEFAULT_PALETTE_KEY = 'e6';
+
+  /** 默认色板（E6 标准色）——保留旧接口 E6Codec.PALETTE 的兼容性 */
+  const PALETTE = PALETTES[DEFAULT_PALETTE_KEY].colors;
+
+  /** 设备 id → 调色板下标（4、7 为保留位，不在表里） */
+  const ID_TO_INDEX = new Map(PALETTE_IDS.map((id, index) => [id, index]));
+
+  /** 按 key 取色板对象，未知 key 回退到默认色板 */
+  function getPalette(key) {
+    return PALETTES[key] || PALETTES[DEFAULT_PALETTE_KEY];
+  }
 
   /** 误差扩散核：[dx, dy, 权重] */
   const KERNELS = {
@@ -96,12 +137,19 @@
     return v < 0 ? 0 : v > 255 ? 255 : v;
   }
 
-  /** 在 6 色调色板里找最接近的颜色，返回调色板索引（0~5） */
-  function nearestIndex(r, g, b) {
+  /**
+   * 在一套色板里找最接近的颜色，返回调色板索引（0~5）。
+   * @param {number} r
+   * @param {number} g
+   * @param {number} b
+   * @param {Array} [colors] 调色板项数组，默认用 E6 标准色
+   */
+  function nearestIndex(r, g, b, colors) {
+    const pal = colors || PALETTE;
     let best = 0;
     let bestD = Infinity;
-    for (let i = 0; i < PALETTE.length; i++) {
-      const c = PALETTE[i].rgb;
+    for (let i = 0; i < pal.length; i++) {
+      const c = pal[i].rgb;
       const dr = r - c[0];
       const dg = g - c[1];
       const db = b - c[2];
@@ -188,6 +236,7 @@
    *   contrast: -100..100
    *   strength: 0..1 误差扩散强度
    *   serpentine: 蛇形扫描
+   *   palette: 色板 key（'e6' / 'e6alt'）或色板对象，缺省用 E6 标准色
    * @returns {{ids: Uint16Array, width: number, height: number, imageData: ImageData, stats: Array}}
    */
   function dither(imageData, opts) {
@@ -197,6 +246,8 @@
     const algo = o.algo || 'floydSteinberg';
     const strength = o.strength == null ? 1 : o.strength;
     const serpentine = !!o.serpentine;
+    const palette = typeof o.palette === 'string' ? getPalette(o.palette) : o.palette || getPalette();
+    const pal = palette.colors;
 
     const src = preprocess(imageData, o.brightness || 0, o.contrast || 0);
     const data = new Float32Array(w * h * 4);
@@ -218,7 +269,8 @@
           ids[y * w + x] = nearestIndex(
             clamp255(data[i] + t - 128),
             clamp255(data[i + 1] + t - 128),
-            clamp255(data[i + 2] + t - 128)
+            clamp255(data[i + 2] + t - 128),
+            pal
           );
         }
       }
@@ -226,7 +278,7 @@
 
     if (algo === 'threshold') {
       for (let p = 0, i = 0; p < ids.length; p++, i += 4) {
-        ids[p] = nearestIndex(data[i], data[i + 1], data[i + 2]);
+        ids[p] = nearestIndex(data[i], data[i + 1], data[i + 2], pal);
       }
     } else if (algo === 'random') {
       for (let p = 0, i = 0; p < ids.length; p++, i += 4) {
@@ -234,7 +286,8 @@
         ids[p] = nearestIndex(
           clamp255(data[i] + n),
           clamp255(data[i + 1] + n),
-          clamp255(data[i + 2] + n)
+          clamp255(data[i + 2] + n),
+          pal
         );
       }
     } else if (algo.startsWith('ordered')) {
@@ -252,9 +305,9 @@
           const or = data[i];
           const og = data[i + 1];
           const ob = data[i + 2];
-          const idx = nearestIndex(or, og, ob);
+          const idx = nearestIndex(or, og, ob, pal);
           ids[y * w + x] = idx;
-          const c = PALETTE[idx].rgb;
+          const c = pal[idx].rgb;
           data[i] = c[0];
           data[i + 1] = c[1];
           data[i + 2] = c[2];
@@ -272,15 +325,16 @@
       }
     }
 
-    return { ids, width: w, height: h, imageData: idsToImageData(ids, w, h), stats: stats(ids) };
+    return { ids, width: w, height: h, imageData: idsToImageData(ids, w, h, pal), stats: stats(ids, pal) };
   }
 
-  /** 调色板索引数组 → 可直接绘制/导出的 ImageData */
-  function idsToImageData(ids, w, h) {
+  /** 调色板索引数组 → 可直接绘制/导出的 ImageData（颜色取自传入的色板） */
+  function idsToImageData(ids, w, h, colors) {
+    const pal = colors || PALETTE;
     const out = new ImageData(w, h);
     const d = out.data;
     for (let p = 0, i = 0; p < ids.length; p++, i += 4) {
-      const c = PALETTE[ids[p]] || PALETTE[0];
+      const c = pal[ids[p]] || pal[0];
       d[i] = c.rgb[0];
       d[i + 1] = c.rgb[1];
       d[i + 2] = c.rgb[2];
@@ -291,6 +345,7 @@
 
   /**
    * 打包成面板 DTM 数据：4bpp，列优先，高半字节是上面的像素。
+   * 调色板索引 → 设备 id（PALETTE_IDS）与用哪套色板无关，所以换色板不影响打包结果结构。
    * @param {Uint16Array} ids 调色板索引（0~5）
    * @returns {Uint8Array} 长度 = w * ceil(h / 2)
    */
@@ -302,8 +357,8 @@
       for (let yg = 0; yg * rowsPerByte < h; yg++) {
         const y0 = yg * rowsPerByte;
         const y1 = y0 + 1;
-        const hi = PALETTE[ids[y0 * w + x]] ? PALETTE[ids[y0 * w + x]].id : 0;
-        const lo = y1 < h && PALETTE[ids[y1 * w + x]] ? PALETTE[ids[y1 * w + x]].id : 0;
+        const hi = PALETTE_IDS[ids[y0 * w + x]] != null ? PALETTE_IDS[ids[y0 * w + x]] : 0;
+        const lo = y1 < h && PALETTE_IDS[ids[y1 * w + x]] != null ? PALETTE_IDS[ids[y1 * w + x]] : 0;
         bytes[p++] = ((hi & 0x0f) << 4) | (lo & 0x0f);
       }
     }
@@ -321,19 +376,20 @@
         const y1 = y0 + 1;
         const hi = (b >> 4) & 0x0f;
         const lo = b & 0x0f;
-        ids[y0 * w + x] = BY_ID.has(hi) ? PALETTE.findIndex((c) => c.id === hi) : 0;
-        if (y1 < h) ids[y1 * w + x] = BY_ID.has(lo) ? PALETTE.findIndex((c) => c.id === lo) : 0;
+        ids[y0 * w + x] = ID_TO_INDEX.has(hi) ? ID_TO_INDEX.get(hi) : 0;
+        if (y1 < h) ids[y1 * w + x] = ID_TO_INDEX.has(lo) ? ID_TO_INDEX.get(lo) : 0;
       }
     }
     return ids;
   }
 
-  /** 每种颜色出现的次数与占比 */
-  function stats(ids) {
-    const counts = new Array(PALETTE.length).fill(0);
+  /** 每种颜色出现的次数与占比（名称 / hex 取自传入的色板） */
+  function stats(ids, colors) {
+    const pal = colors || PALETTE;
+    const counts = new Array(pal.length).fill(0);
     for (let p = 0; p < ids.length; p++) counts[ids[p]]++;
     const total = ids.length || 1;
-    return PALETTE.map((c, i) => ({
+    return pal.map((c, i) => ({
       id: c.id,
       name: c.name,
       hex: c.hex,
@@ -385,7 +441,10 @@
 
   global.E6Codec = {
     PALETTE,
-    BY_ID,
+    PALETTE_IDS,
+    PALETTES,
+    DEFAULT_PALETTE_KEY,
+    getPalette,
     KERNELS,
     BAYER,
     ALGORITHMS,
