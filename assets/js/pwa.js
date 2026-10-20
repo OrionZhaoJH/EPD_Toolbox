@@ -23,7 +23,13 @@
       navigator.serviceWorker
         .register('./sw.js', { scope: './' })
         .then((reg) => {
-          if (reg) reg.update().catch(() => {});
+          if (!reg) return;
+          reg.update().catch(() => {});
+          // 手机上的 PWA 经常挂在后台很久，切回前台时再查一次新版本，
+          // 这样不用「刷新几次」才能拿到新的脚本
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') reg.update().catch(() => {});
+          });
         })
         .catch((err) => {
           console.warn('[PWA] Service Worker 注册失败：', err);

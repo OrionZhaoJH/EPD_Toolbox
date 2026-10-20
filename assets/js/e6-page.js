@@ -11,6 +11,27 @@
   const Codec = window.E6Codec;
   const $ = (id) => document.getElementById(id);
 
+  /**
+   * 版本兜底：Service Worker 升级期间，可能出现「HTML 是新版、脚本还是旧缓存」，
+   * 旧版 codec 没有 PALETTES，会在 initSelects 里抛错、表现为色板下拉空白、
+   * 刷新几次才正常。这里直接给出可执行的提示，并亮出顶栏的「刷新缓存」按钮。
+   */
+  function bailOnStaleAssets(reason) {
+    console.warn('[e6-page] ' + reason);
+    const state = document.getElementById('convertState');
+    if (state) {
+      state.textContent = '脚本版本过旧，请刷新缓存';
+      state.className = 'badge off';
+    }
+    const refresh = document.getElementById('btnRefreshCache');
+    if (refresh) refresh.removeAttribute('hidden');
+  }
+
+  if (!Codec || !Codec.PALETTES || !Codec.getPalette || !Codec.PALETTE_IDS) {
+    bailOnStaleAssets('e6-codec.js 版本过旧（缺少 PALETTES / getPalette），已停止初始化');
+    return;
+  }
+
   /* ---------------- 状态 ---------------- */
   const state = {
     image: null, // 源图（ImageBitmap / HTMLImageElement）
@@ -692,15 +713,21 @@
   onScroll();
 
   /* ---------------- 启动 ---------------- */
-  fillSlotSelect();
-  setBleStatus('idle');
-  setBleConnected(false);
-  setSendProgress(0);
-  initSelects();
-  updateSizeHint();
-  const test = Codec.selfTest();
-  if (test.ok) log('ok', '编解码自检通过（4bpp 打包 / 反解一致）');
-  else log('err', '编解码自检失败：' + test.reason);
+  try {
+    fillSlotSelect();
+    setBleStatus('idle');
+    setBleConnected(false);
+    setSendProgress(0);
+    initSelects();
+    updateSizeHint();
+    const test = Codec.selfTest();
+    if (test.ok) log('ok', '编解码自检通过（4bpp 打包 / 反解一致）');
+    else log('err', '编解码自检失败：' + test.reason);
+  } catch (err) {
+    // 多半是新旧脚本混用（SW 旧缓存），提示刷新而不是留一个「点了没反应」的页面
+    bailOnStaleAssets('初始化失败：' + (err && err.message ? err.message : err) + '，可能是缓存了旧版脚本');
+    return;
+  }
 
   if (!BLE) {
     el.btnConnect.disabled = true;
