@@ -17,7 +17,7 @@
    否则离线包会缺文件（见 docs/conventions.md §13）。
    ========================================================================== */
 
-const VERSION = 'epd-toolbox-v2';
+const VERSION = 'epd-toolbox-v3';
 const PRECACHE = [
   './',
   './index.html',

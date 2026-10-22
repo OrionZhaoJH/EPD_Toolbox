@@ -110,16 +110,6 @@
           </div>
         </div>
 
-        <!-- 六色色板：只决定「量化时往哪 6 个 RGB 上靠」，写进像素的设备 id 不变。
-             选项由 assets/js/e6-codec.js 的 PALETTES 生成，新增色板不用改这里。 -->
-        <div class="form-row" style="margin-top:12px;">
-          <div class="form-group" style="flex:1 1 220px;">
-            <label for="paletteSelect">六色色板</label>
-            <select id="paletteSelect"></select>
-          </div>
-        </div>
-        <div class="palette-preview" id="palettePreview"></div>
-
         <div class="form-row" style="margin-top:12px;">
           <div class="form-group">
             <label for="algo">抖动算法</label>
@@ -286,21 +276,5 @@
 <script src="assets/js/ble.js"></script>
 <script src="assets/js/e6-page.js"></script>
 <script src="assets/js/pwa.js"></script>
-<script>
-  // 缓存自检：如果 e6-page.js 是旧缓存（没有色板逻辑），色板下拉会一直是空的。
-  // 这时把顶栏的「刷新缓存」按钮亮出来，并给出明确提示，避免用户反复刷新碰运气。
-  window.addEventListener('load', function () {
-    var select = document.getElementById('paletteSelect');
-    if (!select || select.options.length > 0) return;
-    var refresh = document.getElementById('btnRefreshCache');
-    if (refresh) refresh.removeAttribute('hidden');
-    var state = document.getElementById('convertState');
-    if (state) {
-      state.textContent = '脚本版本过旧，请点「刷新缓存」';
-      state.className = 'badge off';
-    }
-    console.warn('[e6-image] 色板下拉未初始化，疑似加载到旧版 e6-page.js');
-  });
-</script>
 </body>
 </html>
