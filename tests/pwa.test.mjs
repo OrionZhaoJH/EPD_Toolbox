@@ -75,18 +75,18 @@ console.log('PWA 自测');
     ok(missing.length === 0, missing.length ? 'PRECACHE 指向的文件不存在：' + missing.join(', ') : 'PRECACHE 里的文件都存在');
   }
 
-  // 脚本 / 样式必须走网络优先：否则发版后会出现「HTML 新、脚本旧」，色板下拉空白
+  // 脚本 / 样式必须走网络优先：否则发版后会出现「HTML 新、脚本旧」的混搭
   ok(/const CODE_ASSET = \/\\\.\(\?:js\|css\)\$\/i/.test(sw) || sw.includes('CODE_ASSET'), 'sw.js 有 CODE_ASSET 判定');
   ok(sw.includes('networkFirst') && sw.includes('staleWhileRevalidate'), 'sw.js 同时提供网络优先与缓存优先两种策略');
 }
 
-/* 2.1 旧脚本兜底：色板下拉空时要提示刷新，而不是让用户反复刷新碰运气 */
+/* 2.1 色板已回退：页面不应再有 paletteSelect / e6-page 不应再依赖 PALETTES */
 {
   const page = read('e6-image.html');
-  ok(page.includes("getElementById('paletteSelect')"), 'e6-image.html 有 paletteSelect 自检');
-  ok(page.includes('脚本版本过旧'), 'e6-image.html 会提示「脚本版本过旧」');
   const js = read('assets/js/e6-page.js');
-  ok(js.includes('Codec.PALETTES') && js.includes('bailOnStaleAssets'), 'e6-page.js 启动前校验 codec 版本');
+  ok(!page.includes('paletteSelect'), 'e6-image.html 已移除色板下拉');
+  ok(!page.includes('palettePreview'), 'e6-image.html 已移除色板预览');
+  ok(!js.includes('paletteSelect') && !js.includes('Codec.PALETTES'), 'e6-page.js 不再引用色板 API');
 }
 
 /* 3. 三个页面的接入 */
